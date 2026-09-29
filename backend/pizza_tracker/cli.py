@@ -1,5 +1,6 @@
 """Command-line entry point.
 
+    python -m pizza_tracker.cli doctor        # test every live data source, with a fix for each failure
     python -m pizza_tracker.cli init          # create tables + seed Fortune 10
     python -m pizza_tracker.cli verify        # geocode HQ addresses vs stored coords (--apply to save)
     python -m pizza_tracker.cli map           # discover nearby venues (OSM) and DOT cameras
@@ -72,7 +73,7 @@ def run_worker() -> None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     p = argparse.ArgumentParser(prog="pizza_tracker")
-    p.add_argument("command", choices=["init", "verify", "map", "add-camera", "market", "worker", "study", "demo"])
+    p.add_argument("command", choices=["doctor", "init", "verify", "map", "add-camera", "market", "worker", "study", "demo"])
     p.add_argument("--horizon", type=int, default=5, help="study: forward-return horizon in trading days")
     p.add_argument("--apply", action="store_true", help="verify: save geocoded coordinates")
     p.add_argument("--ticker", help="add-camera: company ticker")
@@ -81,6 +82,13 @@ def main() -> None:
     p.add_argument("--lat", type=float, help="add-camera: camera latitude (defaults to the HQ)")
     p.add_argument("--lon", type=float, help="add-camera: camera longitude (defaults to the HQ)")
     args = p.parse_args()
+
+    if args.command == "doctor":
+        from .doctor import format_checks, run_checks
+
+        results = run_checks()
+        print(format_checks(results))
+        sys.exit(1 if any(r.status == "fail" for r in results) else 0)
 
     init_db()
     with SessionLocal() as s:  # type: Session
