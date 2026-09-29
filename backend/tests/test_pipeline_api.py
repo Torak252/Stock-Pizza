@@ -89,3 +89,27 @@ def test_market_ingest_and_study(tmp_path, monkeypatch):
         assert r.spike_evenings == len(spike_days)
         assert r.mean_abs_ret_spike > 3 * r.mean_abs_ret_all and r.p_value < 0.01
         assert "AAPL" in format_report(results, 1)
+
+
+def test_overview_fields_and_status(client):
+    from pizza_tracker.api.main import defcon_for
+
+    rows = client.get("/companies").json()
+    assert all({"last_night", "trend_24h", "sources"} <= r.keys() for r in rows)
+    assert all(r["latest"]["pct_normal"] is not None for r in rows)
+    assert all(r["sources"]["venues"] == 1 for r in rows)
+    st = client.get("/status").json()
+    assert st["mode"] == "demo" and 1 <= st["defcon"] <= 5
+    assert defcon_for([]) == 5 and defcon_for(["normal", "elevated"]) == 4
+    assert defcon_for(["high"]) == 3 and defcon_for(["extreme"]) == 2 and defcon_for(["extreme"] * 3) == 1
+
+
+def test_init_db_adds_missing_columns(tmp_path):
+    from sqlalchemy import inspect, text
+
+    engine = db.make_engine(f"sqlite:///{tmp_path / 'old.db'}")
+    with engine.begin() as conn:  # an index_readings table from before pct_normal existed
+        conn.execute(text("CREATE TABLE index_readings (id INTEGER PRIMARY KEY, ts DATETIME, company_id INTEGER, "
+                          "score FLOAT, components JSON, level VARCHAR(16), off_hours BOOLEAN)"))
+    db.init_db(engine)
+    assert "pct_normal" in {c["name"] for c in inspect(engine).get_columns("index_readings")}

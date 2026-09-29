@@ -44,7 +44,8 @@ def _iso_utc(ts: datetime) -> str:
 def _reading_dict(r: IndexReading | None) -> dict | None:
     if r is None:
         return None
-    return {"ts": _iso_utc(r.ts), "score": r.score, "level": r.level, "off_hours": r.off_hours, "components": r.components}
+    return {"ts": _iso_utc(r.ts), "score": r.score, "level": r.level, "off_hours": r.off_hours,
+            "pct_normal": r.pct_normal, "components": r.components}
 
 
 @app.get("/health")
@@ -52,17 +53,74 @@ def health() -> dict:
     return {"ok": True, "time": datetime.now(timezone.utc).isoformat()}
 
 
+LEVEL_RANK = {"normal": 0, "elevated": 1, "high": 2, "extreme": 3}
+
+
+def _last_night_peaks(session: Session, since: datetime) -> dict[int, IndexReading]:
+    """Highest-scoring off-hours reading per company since `since`."""
+    peaks: dict[int, IndexReading] = {}
+    rows = session.scalars(select(IndexReading).where(IndexReading.ts >= since, IndexReading.off_hours.is_(True)))
+    for r in rows:
+        if r.company_id not in peaks or r.score > peaks[r.company_id].score:
+            peaks[r.company_id] = r
+    return peaks
+
+
+def _trends(session: Session, since: datetime) -> dict[int, list[dict]]:
+    out: dict[int, list[dict]] = {}
+    rows = session.execute(
+        select(IndexReading.company_id, IndexReading.ts, IndexReading.score, IndexReading.off_hours)
+        .where(IndexReading.ts >= since).order_by(IndexReading.ts)
+    ).all()
+    for cid, ts, score, off in rows:
+        out.setdefault(cid, []).append({"ts": _iso_utc(ts), "score": round(score, 2), "off_hours": off})
+    return out
+
+
 @app.get("/companies")
 def companies(session: Session = Depends(get_session)) -> list[dict]:
-    latest = _latest_readings(session)
+    """Every HQ with its latest reading, last night's peak, a 24 h trend and source counts."""
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    latest, peaks, trends = _latest_readings(session), _last_night_peaks(session, since), _trends(session, since)
+    counts: dict[tuple[int, str], int] = {
+        (cid, kind): n for cid, kind, n in session.execute(
+            select(SignalSource.company_id, SignalSource.kind, func.count()).group_by(SignalSource.company_id, SignalSource.kind)
+        ).all()
+    }
     return [
         {
             "ticker": c.ticker, "name": c.name, "rank": c.fortune_rank, "hq_address": c.hq_address,
             "lat": c.lat, "lon": c.lon, "timezone": c.timezone, "coords_verified": c.coords_verified,
             "latest": _reading_dict(latest.get(c.id)),
+            "last_night": _reading_dict(peaks.get(c.id)),
+            "trend_24h": trends.get(c.id, []),
+            "sources": {"cameras": counts.get((c.id, "camera"), 0), "venues": counts.get((c.id, "venue"), 0)},
         }
         for c in session.scalars(select(Company).order_by(Company.fortune_rank))
     ]
+
+
+def defcon_for(levels: list[str]) -> int:
+    """5 = quiet everywhere ... 1 = several HQs at 'extreme' in the same 24 h."""
+    extreme = sum(lv == "extreme" for lv in levels)
+    top = max((LEVEL_RANK[lv] for lv in levels), default=0)
+    if extreme >= 3:
+        return 1
+    return 5 - top
+
+
+@app.get("/status")
+def status(session: Session = Depends(get_session)) -> dict:
+    """Headline state for the dashboard: DEFCON-style level and whether the data is synthetic."""
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    peaks = _last_night_peaks(session, since)
+    demo = session.scalar(select(SignalSource.id).where(SignalSource.provider == "synthetic").limit(1)) is not None
+    return {
+        "mode": "demo" if demo else "live",
+        "defcon": defcon_for([r.level for r in peaks.values()]),
+        "hqs_elevated": sum(r.level != "normal" for r in peaks.values()),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 def _company_or_404(session: Session, ticker: str) -> Company:

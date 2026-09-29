@@ -15,6 +15,16 @@ MAD_TO_SIGMA = 1.4826
 # score whose providers quantise to ~5 points; camera counts jitter by a couple of vehicles.
 METRIC_SCALE_FLOORS = {"venue_busyness": 5.0, "vehicle_count": 2.0, "delivery_vehicle_count": 1.0, "parking_occupancy": 3.0}
 
+# Smallest "normal" level a percentage is taken against. Late at night the true baseline can be
+# ~0, and 6 cars vs a median of 1 is not "600% of normal" in any useful sense.
+METRIC_PCT_BASE = {"venue_busyness": 20.0, "vehicle_count": 10.0, "delivery_vehicle_count": 3.0, "parking_occupancy": 20.0}
+
+
+def pct_of_normal(metric: str, value: float, median: float) -> float:
+    """100 = normal. The change is measured against max(median, a per-metric minimum base)."""
+    base = max(median, METRIC_PCT_BASE.get(metric, 1.0))
+    return max(0.0, 100.0 * (1 + (value - median) / base))
+
 
 def add_local_calendar(df: pd.DataFrame, tz: str) -> pd.DataFrame:
     """Expects a UTC `ts` column; adds local `dow`, `hour` and `minute`."""

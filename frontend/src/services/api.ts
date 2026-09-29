@@ -5,7 +5,14 @@ export interface Reading {
   score: number;
   level: Level;
   off_hours: boolean;
+  pct_normal: number | null;
   components: Record<string, number>;
+}
+
+export interface TrendPoint {
+  ts: string;
+  score: number;
+  off_hours: boolean;
 }
 
 export interface Company {
@@ -18,6 +25,16 @@ export interface Company {
   timezone: string;
   coords_verified: boolean;
   latest: Reading | null;
+  last_night: Reading | null;
+  trend_24h: TrendPoint[];
+  sources: { cameras: number; venues: number };
+}
+
+export interface Status {
+  mode: "demo" | "live";
+  defcon: 1 | 2 | 3 | 4 | 5;
+  hqs_elevated: number;
+  generated_at: string;
 }
 
 export interface Spike extends Reading {
@@ -57,6 +74,7 @@ async function get<T>(path: string): Promise<T> {
 
 export const api = {
   companies: () => get<Company[]>("/companies"),
+  status: () => get<Status>("/status"),
   spikes: (limit = 50) => get<Spike[]>(`/spikes?limit=${limit}`),
   readings: (ticker: string, hours = 168) => get<Reading[]>(`/companies/${ticker}/readings?hours=${hours}`),
   sources: (ticker: string) => get<Source[]>(`/companies/${ticker}/sources`),
@@ -92,9 +110,35 @@ export const api = {
   },
 };
 
-export const LEVEL_STYLE: Record<Level, { hex: string; badge: string }> = {
-  normal: { hex: "#64748b", badge: "bg-slate-700 text-slate-200" },
-  elevated: { hex: "#f59e0b", badge: "bg-amber-500/20 text-amber-300" },
-  high: { hex: "#f97316", badge: "bg-orange-500/20 text-orange-300" },
-  extreme: { hex: "#ef4444", badge: "bg-red-500/20 text-red-300" },
+// Status colors never carry meaning alone: every use pairs them with the icon and label.
+export const LEVEL: Record<Level, { label: string; icon: string; color: string }> = {
+  normal: { label: "Quiet", icon: "●", color: "var(--color-quiet)" },
+  elevated: { label: "Warm", icon: "▲", color: "var(--color-warm)" },
+  high: { label: "Hot", icon: "◆", color: "var(--color-hot)" },
+  extreme: { label: "On fire", icon: "✶", color: "var(--color-fire)" },
 };
+
+export const METRIC_LABEL: Record<string, string> = {
+  venue_busyness: "pizza place busyness",
+  vehicle_count: "cars at the gate",
+  delivery_vehicle_count: "delivery vehicles",
+  parking_occupancy: "parking lot",
+};
+
+export const METRIC_SHORT: Record<string, string> = {
+  venue_busyness: "pizza place",
+  vehicle_count: "gate traffic",
+  delivery_vehicle_count: "deliveries",
+  parking_occupancy: "parking",
+};
+
+export function hqTime(ts: string | Date, timeZone: string, withDay = false) {
+  return new Date(ts).toLocaleString("en-US", {
+    timeZone, hour: "numeric", minute: "2-digit", timeZoneName: "short",
+    ...(withDay ? { weekday: "short" } : {}),
+  });
+}
+
+export function pct(value: number | null | undefined) {
+  return value == null ? "–" : `${Math.round(value)}%`;
+}

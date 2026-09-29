@@ -87,3 +87,12 @@ def test_metric_floor_stops_near_zero_noise_from_spiking():
     hist = pd.DataFrame({"metric": ["venue_busyness"] * 6, "dow": [1] * 6, "hour": [6] * 6, "value": [0, 1, 0, 2, 0, 1]})
     cur = pd.DataFrame({"metric": ["venue_busyness"], "dow": [1], "hour": [6], "value": [8.0]})
     assert robust_z(cur, build_baseline(hist))["z"].iloc[0] < 2
+
+
+def test_pct_of_normal_uses_a_minimum_base():
+    from pizza_tracker.analytics.baseline import pct_of_normal
+
+    assert pct_of_normal("venue_busyness", 60, 60) == 100
+    assert pct_of_normal("venue_busyness", 90, 60) == 150
+    assert pct_of_normal("venue_busyness", 6, 1) == 125  # near-zero night baseline: not 600%
+    assert pct_of_normal("venue_busyness", 0, 60) == 0

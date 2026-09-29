@@ -74,6 +74,8 @@ class IndexReading(Base):
     components: Mapped[dict] = mapped_column(JSON, default=dict)  # per-metric z-scores
     level: Mapped[str] = mapped_column(String(16))  # "normal" | "elevated" | "high" | "extreme"
     off_hours: Mapped[bool] = mapped_column(default=False)
+    # Current activity as a percentage of the baseline median, averaged over metrics (100 = normal).
+    pct_normal: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class PriceBar(Base):

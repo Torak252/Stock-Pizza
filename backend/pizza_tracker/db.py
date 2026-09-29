@@ -23,7 +23,20 @@ def get_session():
         yield session
 
 
+# Columns added after the first release: (table, column, SQL type). create_all() never alters
+# existing tables, so databases created earlier get these added here.
+_ADDED_COLUMNS = [("index_readings", "pct_normal", "FLOAT")]
+
+
 def init_db(bind=None) -> None:
+    from sqlalchemy import inspect, text
+
     from . import models  # noqa: F401  (register tables)
 
-    Base.metadata.create_all(bind=bind or engine)
+    bind = bind or engine
+    Base.metadata.create_all(bind=bind)
+    insp = inspect(bind)
+    with bind.begin() as conn:
+        for table, column, sql_type in _ADDED_COLUMNS:
+            if column not in {c["name"] for c in insp.get_columns(table)}:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}"))

@@ -1,5 +1,50 @@
 @import "tailwindcss";
 
-html, body { height: 100%; }
-body { background: #0b0f17; color: #e2e8f0; }
-.leaflet-container { background: #0b0f17; }
+@theme {
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-bg: #07090d;
+  --color-panel: #0d1219;
+  --color-panel-2: #121924;
+  --color-line: #1d2633;
+  --color-line-2: #2a3544;
+  --color-ink: #e9eef4;
+  --color-ink-2: #9aa7b8;
+  --color-ink-3: #5f6d80;
+  --color-cheese: #ffb627;
+
+  /* status palette (fixed): quiet / warm / hot / on fire */
+  --color-quiet: #0ca30c;
+  --color-warm: #fab219;
+  --color-hot: #ec835a;
+  --color-fire: #d03b3b;
+}
+
+html, body { min-height: 100%; }
+body {
+  background:
+    radial-gradient(1200px 600px at 70% -10%, rgb(255 182 39 / 0.06), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgb(208 59 59 / 0.05), transparent 60%),
+    var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-display);
+}
+
+/* faint scanline texture for the "ops room" feel */
+.scanlines {
+  background-image: repeating-linear-gradient(0deg, rgb(255 255 255 / 0.018) 0 1px, transparent 1px 3px);
+}
+
+@keyframes ping-ring {
+  0% { r: 5; opacity: 0.8; }
+  100% { r: 22; opacity: 0; }
+}
+.ping { animation: ping-ring 1.8s cubic-bezier(0, 0, 0.2, 1) infinite; }
+
+@keyframes blink { 50% { opacity: 0.25; } }
+.blink { animation: blink 1.2s steps(2, start) infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ping, .blink { animation: none; }
+}

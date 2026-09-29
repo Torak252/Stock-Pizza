@@ -9,7 +9,7 @@ import pandas as pd
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from .analytics.baseline import add_local_calendar, build_baseline, robust_z
+from .analytics.baseline import add_local_calendar, build_baseline, pct_of_normal, robust_z
 from .analytics.scoring import score_snapshot
 from .collectors.foot_traffic import SyntheticProvider
 from .config import get_settings
@@ -186,13 +186,17 @@ def _score_frame(df: pd.DataFrame, company: Company, now: datetime) -> IndexRead
     baseline = build_baseline(hourly, min_samples=s.min_baseline_samples)
     latest = current.groupby("metric", as_index=False).agg(value=("value", "mean"))
     latest = latest.assign(dow=local.weekday(), hour=local.hour)
-    z = robust_z(latest, baseline).set_index("metric")["z"].to_dict()
+    scored = robust_z(latest, baseline).set_index("metric")
+    z = scored["z"].to_dict()
+    pcts = [pct_of_normal(m, row["value"], row["median"]) for m, row in scored.dropna(subset=["median"]).iterrows()]
+    pct_normal = round(sum(pcts) / len(pcts), 1) if pcts else None
 
     reading = score_snapshot(z, local.hour, s.z_threshold, s.off_hours_start, s.off_hours_end)
     if reading.score is None:
         return None
     return IndexReading(ts=now, company_id=company.id, score=round(reading.score, 3),
-                        components=reading.components, level=reading.level, off_hours=reading.off_hours)
+                        components=reading.components, level=reading.level, off_hours=reading.off_hours,
+                        pct_normal=pct_normal)
 
 
 def score_company(session: Session, company: Company, now: datetime | None = None) -> IndexReading | None:
