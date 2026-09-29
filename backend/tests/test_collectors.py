@@ -55,3 +55,32 @@ def test_parse_nominatim():
     hit = parse_nominatim([{"lat": "37.3346", "lon": "-122.0090", "display_name": "Apple Park, Cupertino", "osm_type": "way"}])
     assert (hit.lat, hit.lon, hit.osm_type) == (37.3346, -122.009, "way")
     assert parse_nominatim([]) is None
+
+
+def test_atis511_accepts_both_payload_shapes():
+    from pizza_tracker.collectors.cameras import Atis511Provider
+
+    payload = [
+        {"ID": "A1", "Name": "I-476 at Conshohocken", "Latitude": 40.08, "Longitude": -75.30,
+         "Url": "https://example/a1.jpg", "RoadwayName": "I-476", "DirectionOfTravel": "Northbound"},
+        {"Id": 7, "Location": "I-76 at Gulph Mills", "Latitude": 40.07, "Longitude": -75.35,
+         "Views": [{"Url": "https://example/off.jpg", "Status": "Disabled"}, {"Url": "https://example/b7.jpg", "Status": "Enabled"}]},
+        {"ID": "gone", "Name": "disabled cam", "Latitude": 40, "Longitude": -75, "Url": "https://example/x.jpg", "Disabled": True},
+        {"ID": "nocoords", "Name": "no coords", "Url": "https://example/y.jpg"},
+    ]
+    cams = Atis511Provider("www.511pa.com", "k", "511pa", client=object()).parse_inventory(payload)
+    assert [(c.external_id, c.image_url) for c in cams] == [("A1", "https://example/a1.jpg"), ("7", "https://example/b7.jpg")]
+    assert cams[0].meta == {"road": "I-476", "direction": "Northbound"} and cams[1].name == "I-76 at Gulph Mills"
+
+
+def test_providers_only_when_configured(monkeypatch):
+    from pizza_tracker.collectors import cameras
+
+    keys = type("S", (), {"wsdot_access_code": "", "pa511_api_key": ""})()
+    monkeypatch.setattr(cameras, "get_settings", lambda: keys)
+    assert [p.name for p in cameras.providers_for_state("CA")] == ["caltrans"]
+    assert cameras.providers_for_state("WA") == [] and cameras.providers_for_state("PA") == []
+    assert cameras.providers_for_state("TX") == []
+    keys.wsdot_access_code, keys.pa511_api_key = "w", "p"
+    assert [p.name for p in cameras.providers_for_state("WA")] == ["wsdot"]
+    assert [p.name for p in cameras.providers_for_state("PA")] == ["511pa"]

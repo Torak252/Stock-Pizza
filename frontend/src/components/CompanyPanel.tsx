@@ -60,19 +60,19 @@ export default function CompanyPanel({ company }: { company: Company }) {
         <p className="text-xs text-slate-500">Dashed line = z 2.0 alert threshold. Dots = off-hours spikes.</p>
       </section>
 
-      {cameras.length > 0 && (
+      {cameras.length > 0 ? (
         <section>
           <h3 className="mb-1 text-sm font-medium text-slate-300">DOT cameras</h3>
-          <p className="mb-2 text-xs text-slate-500">Click a camera to mark the gate lanes to count.</p>
+          <p className="mb-2 text-xs text-slate-500">Click a camera to mark the gate lanes to count, or turn it off.</p>
           <div className="grid grid-cols-2 gap-2">
-            {cameras.slice(0, 4).map((c) => (
+            {cameras.slice(0, 6).map((c) => (
               <button key={c.id} onClick={() => setEditing(c)}
-                className="overflow-hidden rounded border border-slate-800 text-left hover:border-orange-400">
+                className={`overflow-hidden rounded border border-slate-800 text-left hover:border-orange-400 ${c.enabled ? "" : "opacity-50"}`}>
                 <span className="relative block">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={c.url!} alt={c.name} className="aspect-video w-full object-cover" loading="lazy" />
-                  <span className={`absolute right-1 top-1 rounded px-1 text-[10px] ${c.roi ? "bg-green-600/80" : "bg-slate-700/80"}`}>
-                    {c.roi ? "lanes set" : "no lanes"}
+                  <span className={`absolute right-1 top-1 rounded px-1 text-[10px] ${!c.enabled ? "bg-slate-900/90" : c.roi ? "bg-green-600/80" : "bg-slate-700/80"}`}>
+                    {!c.enabled ? "off" : c.roi ? "lanes set" : "no lanes"}
                   </span>
                 </span>
                 <span className="block truncate px-1 py-0.5 text-xs text-slate-400">
@@ -82,6 +82,10 @@ export default function CompanyPanel({ company }: { company: Company }) {
             ))}
           </div>
         </section>
+      ) : (
+        <p className="text-xs text-slate-500">
+          No cameras for this HQ yet. Run <code>cli map</code>, or add a public camera still with <code>cli add-camera</code>.
+        </p>
       )}
 
       {editing && (

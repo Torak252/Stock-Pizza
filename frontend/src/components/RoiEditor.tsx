@@ -9,6 +9,7 @@ const clamp = (v: number) => Math.min(1, Math.max(0, v));
 export default function RoiEditor({ source, onClose, onSaved }: { source: Source; onClose: () => void; onSaved: () => void }) {
   const [roi, setRoi] = useState<Roi | null>(source.roi);
   const [saved, setSaved] = useState<Roi | null>(source.roi);
+  const [enabled, setEnabled] = useState(source.enabled);
   const [start, setStart] = useState<[number, number] | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [status, setStatus] = useState<string>("");
@@ -58,6 +59,19 @@ export default function RoiEditor({ source, onClose, onSaved }: { source: Source
     }
   };
 
+  const toggleEnabled = async () => {
+    const next = !enabled;
+    setEnabled(next); // optimistic; reverted below if the save fails
+    try {
+      await api.setEnabled(source.id, next);
+      setStatus(next ? "Camera turned on." : "Camera turned off: the worker will skip it. Past counts are kept.");
+      onSaved();
+    } catch (e) {
+      setEnabled(!next);
+      setStatus(String(e));
+    }
+  };
+
   const dirty = JSON.stringify(roi) !== JSON.stringify(saved);
 
   return (
@@ -99,6 +113,11 @@ export default function RoiEditor({ source, onClose, onSaved }: { source: Source
             title={dirty ? "Save the box first" : undefined}
             className="rounded border border-slate-600 px-3 py-1 disabled:opacity-40">Preview detections</button>
           {preview && <button onClick={() => setPreview(null)} className="rounded border border-slate-600 px-3 py-1">Back to editing</button>}
+          <label className="ml-auto flex cursor-pointer items-center gap-2 text-slate-300"
+            title="Turn off cameras that show no campus entrance">
+            <input type="checkbox" checked={enabled} onChange={toggleEnabled} className="accent-orange-500" />
+            Count this camera
+          </label>
         </div>
         {status && <p className="text-xs text-slate-300">{status}</p>}
       </div>

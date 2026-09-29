@@ -39,7 +39,8 @@ Three constraints shape the design:
 | ~~Domino's / Papa John's order data~~ | — | ❌ Private, ToS-protected | Not available. We watch the *venue's busyness*, not its orders |
 | Traffic cameras (CA) | **Caltrans CWWP2** CCTV JSON | ✅ Public, documented | Stills refresh every 1–5 min. Poll no faster than that |
 | Traffic cameras (WA) | **WSDOT Traveler API** | ✅ Free access code | |
-| Traffic cameras (TX, MN, AR, NE, RI, PA) | State 511 / DOT feeds | ⚠️ To be added per state; check each one's terms | Some states only allow embedding, not redistribution. Store counts, never frames |
+| Traffic cameras (PA) | **511PA** developer API (shared "511" platform) | ✅ Free key | Parser handles both known payload shapes. Not yet run against the live API |
+| Traffic cameras (TX, MN, RI, NE, AR) | Individual public stills, added with `cli add-camera` | ⚠️ Check each site's terms | Some states only allow embedding, not redistribution. Store counts, never frames |
 | Traffic speed/density | TomTom / HERE traffic flow APIs | ⚠️ Free tiers exist, but their terms limit use | Not used yet. Candidate fallback where no camera sits near a gate |
 | Prices | yfinance | ⚠️ Unofficial Yahoo wrapper | Fine for personal research, which is the scope |
 | Filings | **SEC EDGAR** | ✅ Official; ≤10 req/s; UA must include a contact email | `SPT_CONTACT_EMAIL` is required |
@@ -79,13 +80,20 @@ Live signals come from **DOT cameras only**, counted with YOLO:
 |---|---|---|
 | Apple (Cupertino), Alphabet (Mountain View) | Caltrans District 4 | ✅ Implemented |
 | Amazon (Seattle) | WSDOT (free access code) | ✅ Implemented |
-| Exxon Mobil, McKesson (TX) | TxDOT / DriveTexas | ⏳ Needs a provider |
-| UnitedHealth (MN) | MnDOT / 511MN | ⏳ Needs a provider |
-| Cencora (PA) | 511PA | ⏳ Needs a provider |
-| CVS (RI) | RIDOT | ⏳ Needs a provider |
-| Berkshire (NE), Walmart (AR) | Nebraska 511 / IDriveArkansas | ⏳ Needs a provider; freeway cameras may be too far from the HQ to help |
+| Cencora (Conshohocken) | 511PA (free developer key) | ✅ Implemented, not yet run live |
+| Exxon Mobil, McKesson (TX) | TxDOT / DriveTexas | ✍️ Manual: `cli add-camera` |
+| UnitedHealth (MN) | MnDOT / 511MN | ✍️ Manual: `cli add-camera` |
+| CVS (RI) | RIDOT | ✍️ Manual: `cli add-camera` |
+| Berkshire (NE), Walmart (AR) | Nebraska 511 / IDriveArkansas | ✍️ Manual; freeway cameras may be too far from the HQ to help |
 
-Until more providers exist, only 3 of the 10 HQs produce live readings.
+"Manual" means: find a public camera still near the campus on the state DOT's traveller map, copy its image URL, and register it:
+
+```bash
+python -m pizza_tracker.cli add-camera --ticker XOM --name "I-45 at Rayford Rd" \
+    --url https://.../camera.jpg --lat 30.09 --lon -95.43
+```
+
+Every camera, found automatically or added by hand, can be turned off on the dashboard if it shows no campus entrance; its past counts are kept.
 
 ## 5. Phase roadmap
 
@@ -94,6 +102,7 @@ Until more providers exist, only 3 of the 10 HQs produce live readings.
 | **1** | Schema, collectors, baseline + POI scoring, event-study code, REST API, dashboard, synthetic demo, tests |
 | **2** | Free-data, local-first mode; daily market + EDGAR ingestion; `cli study` report; demo/real database guards |
 | **3a** | Tooling for the manual checks: `cli verify` (Nominatim geocoding), a gate-lane (ROI) editor with live YOLO preview on the dashboard |
-| 3b | Run those checks locally; add TX/MN/PA/RI camera providers; start collecting 24/7 |
+| **3b** | 511PA provider; `cli add-camera` for any public still; per-camera on/off switch |
+| 3c | Run the manual checks locally, add cameras for the remaining HQs, start collecting 24/7 |
 | 4 | After ~3 months of data: SPY-adjusted returns, Benjamini–Hochberg correction across tickers, predictive dashboard page |
 | 5 | Scale toward the Fortune 500 (CSV import + geocoding, Postgres, queue-based workers) |

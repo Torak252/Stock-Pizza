@@ -43,7 +43,7 @@ cd frontend && npm install && npm run dev               # http://localhost:3000
 
 ```bash
 cd backend
-cp .env.example .env                  # set SPT_CONTACT_EMAIL; add a free WSDOT code for Seattle
+cp .env.example .env                  # set SPT_CONTACT_EMAIL; free WSDOT code (Seattle) and 511PA key (Conshohocken)
 pip install -e ".[vision]"            # YOLO camera counting (CPU is fine)
 python -m pizza_tracker.cli verify    # geocode each HQ address; review shifts > 500 m on a map
 python -m pizza_tracker.cli verify --apply
@@ -63,7 +63,9 @@ python -m pizza_tracker.cli market            # 2y daily bars, earnings dates, S
 python -m pizza_tracker.cli study --horizon 5 # spike evenings vs |5-day return| and surprise 8-Ks
 ```
 
-Cameras keep no archive, so the report only becomes meaningful after a few months of collection. Only Apple, Alphabet and Amazon have camera coverage so far; see docs/ARCHITECTURE.md §4.
+Cameras keep no archive, so the report only becomes meaningful after a few months of collection.
+
+**Coverage.** `cli map` finds cameras automatically for Apple, Alphabet, Amazon and Cencora. For the other HQs, copy a public camera image URL from the state DOT's traveller map and run `cli add-camera --ticker XOM --name "..." --url ...` (details in docs/ARCHITECTURE.md §4). On the dashboard, turn off any camera that doesn't show a campus entrance.
 
 Docker Compose (Postgres + TimescaleDB) is kept as an option: `docker compose up --build`.
 

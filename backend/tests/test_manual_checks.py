@@ -80,3 +80,59 @@ def test_roi_roundtrip_and_validation(Session):
             assert s.get(SignalSource, cam_id).meta == {"route": "I-280"}  # other meta untouched
     finally:
         app.dependency_overrides.clear()
+
+
+def test_add_manual_camera(Session):
+    with Session() as s:
+        src = pipeline.add_manual_camera(s, "xom", "I-45 at Rayford", "https://example/cam.jpg", 30.09, -95.43)
+        assert src.provider == "manual" and 500 < src.distance_m < 1000
+        same_place = pipeline.add_manual_camera(s, "MCK", "Gate cam", "https://example/gate.jpg")
+        assert same_place.distance_m == 0  # defaults to the HQ point
+        for args, msg in [
+            (("XOM", "dup", "https://example/cam.jpg"), "already registered"),
+            (("NOPE", "x", "https://example/z.jpg"), "unknown ticker"),
+            (("XOM", "x", "ftp://example/z.jpg"), "http"),
+        ]:
+            with pytest.raises(ValueError, match=msg):
+                pipeline.add_manual_camera(s, *args)
+
+
+def test_disabled_cameras_are_skipped(Session, monkeypatch):
+    import sys
+    import types
+
+    from pizza_tracker.collectors import cameras
+    from pizza_tracker.models import ActivitySample
+    from pizza_tracker.vision.detector import FrameCounts
+
+    fake_detector = types.SimpleNamespace(count_vehicles=lambda img, roi=None: FrameCounts(4, 1, {"car": 3, "truck": 1}))
+    monkeypatch.setitem(sys.modules, "pizza_tracker.vision.detector", fake_detector)
+    monkeypatch.setattr(cameras, "fetch_snapshot", lambda url: b"jpeg")
+    with Session() as s:
+        on = pipeline.add_manual_camera(s, "XOM", "on", "https://example/on.jpg")
+        off = pipeline.add_manual_camera(s, "XOM", "off", "https://example/off.jpg")
+        off.meta = {"disabled": True}
+        s.commit()
+        assert pipeline.collect_camera_counts(s) == 1
+        assert {r.source_id for r in s.query(ActivitySample)} == {on.id}
+
+
+def test_enable_toggle_endpoint(Session):
+    with Session() as s:
+        cam_id = pipeline.add_manual_camera(s, "XOM", "c", "https://example/c.jpg").id
+
+    def override():
+        with Session() as s:
+            yield s
+
+    app.dependency_overrides[db.get_session] = override
+    try:
+        c = TestClient(app)
+        assert c.put(f"/sources/{cam_id}/enabled", json={"enabled": False}).json() == {"id": cam_id, "enabled": False}
+        assert c.get("/companies/XOM/sources").json()[0]["enabled"] is False
+        c.put(f"/sources/{cam_id}/enabled", json={"enabled": True})
+        assert c.get("/companies/XOM/sources").json()[0]["enabled"] is True
+        with Session() as s:
+            assert s.get(SignalSource, cam_id).meta == {}
+    finally:
+        app.dependency_overrides.clear()

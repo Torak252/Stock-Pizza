@@ -38,6 +38,7 @@ export interface Source {
   distance_m: number;
   url: string | null;
   roi: Roi | null;
+  enabled: boolean;
 }
 
 export interface Preview {
@@ -69,6 +70,15 @@ export const api = {
     });
     if (!res.ok) throw new Error(`save ROI: HTTP ${res.status} ${await res.text()}`);
     return (await res.json()).roi;
+  },
+
+  async setEnabled(sourceId: number, enabled: boolean): Promise<void> {
+    const res = await fetch(`${BASE}/sources/${sourceId}/enabled`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) throw new Error(`toggle camera: HTTP ${res.status}`);
   },
 
   async preview(sourceId: number): Promise<Preview> {

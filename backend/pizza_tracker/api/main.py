@@ -77,7 +77,8 @@ def sources(ticker: str, session: Session = Depends(get_session)) -> list[dict]:
     c = _company_or_404(session, ticker)
     return [
         {"id": s.id, "kind": s.kind, "provider": s.provider, "name": s.name, "lat": s.lat, "lon": s.lon,
-         "distance_m": s.distance_m, "url": s.url, "roi": (s.meta or {}).get("roi")}
+         "distance_m": s.distance_m, "url": s.url, "roi": (s.meta or {}).get("roi"),
+         "enabled": not (s.meta or {}).get("disabled", False)}
         for s in session.scalars(select(SignalSource).where(SignalSource.company_id == c.id).order_by(SignalSource.distance_m))
     ]
 
@@ -147,6 +148,24 @@ def set_roi(source_id: int, roi: Roi | None = None, session: Session = Depends(g
     src.meta = meta
     session.commit()
     return {"id": src.id, "roi": meta.get("roi")}
+
+
+class Enabled(BaseModel):
+    enabled: bool
+
+
+@app.put("/sources/{source_id}/enabled")
+def set_enabled(source_id: int, body: Enabled, session: Session = Depends(get_session)) -> dict:
+    """Turn counting off for a camera that doesn't show a campus entrance (history is kept)."""
+    src = _camera_or_404(session, source_id)
+    meta = dict(src.meta or {})
+    if body.enabled:
+        meta.pop("disabled", None)
+    else:
+        meta["disabled"] = True
+    src.meta = meta
+    session.commit()
+    return {"id": src.id, "enabled": body.enabled}
 
 
 @app.get("/sources/{source_id}/preview", responses={200: {"content": {"image/jpeg": {}}}})

@@ -48,26 +48,48 @@ def map_venues(session: Session, radius_m: int = 3000, max_per_company: int = 8)
 
 
 def map_cameras(session: Session, radius_m: float = 5000) -> int:
-    from .collectors.cameras import PROVIDERS_BY_STATE
+    from .collectors.cameras import providers_for_state
 
     added = 0
     for company in session.scalars(select(Company)):
         state = company.hq_address.rsplit(",", 1)[-1].strip()[:2]
-        provider_cls = PROVIDERS_BY_STATE.get(state)
-        if not provider_cls:
-            continue
-        try:
-            nearest = provider_cls().nearest(company.lat, company.lon, radius_m)
-        except Exception as exc:
-            log.warning("camera lookup failed for %s: %s", company.ticker, exc)
-            continue
-        for cam, dist in nearest:
-            added += _add_source_if_new(session, SignalSource(
-                company_id=company.id, kind="camera", provider=cam.provider, external_id=cam.external_id, name=cam.name,
-                lat=cam.lat, lon=cam.lon, distance_m=round(dist), url=cam.image_url, meta=cam.meta,
-            ))
+        for provider in providers_for_state(state):
+            try:
+                nearest = provider.nearest(company.lat, company.lon, radius_m)
+            except Exception as exc:
+                log.warning("%s camera lookup failed for %s: %s", provider.name, company.ticker, exc)
+                continue
+            for cam, dist in nearest:
+                added += _add_source_if_new(session, SignalSource(
+                    company_id=company.id, kind="camera", provider=cam.provider, external_id=cam.external_id, name=cam.name,
+                    lat=cam.lat, lon=cam.lon, distance_m=round(dist), url=cam.image_url, meta=cam.meta,
+                ))
     session.commit()
     return added
+
+
+def add_manual_camera(session: Session, ticker: str, name: str, url: str,
+                      lat: float | None = None, lon: float | None = None) -> SignalSource:
+    """Register a public camera still found by hand (state DOT camera pages, city feeds, ...)."""
+    import hashlib
+
+    from .geo import haversine_m
+
+    company = session.scalar(select(Company).where(Company.ticker == ticker.upper()))
+    if company is None:
+        raise ValueError(f"unknown ticker {ticker}")
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("url must be an http(s) link to a still image")
+    lat, lon = (company.lat, company.lon) if lat is None or lon is None else (lat, lon)
+    src = SignalSource(
+        company_id=company.id, kind="camera", provider="manual",
+        external_id=hashlib.sha1(url.encode()).hexdigest()[:16], name=name, lat=lat, lon=lon,
+        distance_m=round(haversine_m(company.lat, company.lon, lat, lon)), url=url, meta={},
+    )
+    if not _add_source_if_new(session, src):
+        raise ValueError("that camera URL is already registered for this company")
+    session.commit()
+    return src
 
 
 # ---------------------------------------------------------------- HQ verification (manual)
@@ -111,8 +133,10 @@ def collect_camera_counts(session: Session, now: datetime | None = None) -> int:
     now = now or datetime.now(timezone.utc)
     n = 0
     for src in session.scalars(select(SignalSource).where(SignalSource.kind == "camera")):
+        if (src.meta or {}).get("disabled"):
+            continue
         try:
-            counts = count_vehicles(fetch_snapshot(src.url), roi=src.meta.get("roi"))
+            counts = count_vehicles(fetch_snapshot(src.url), roi=(src.meta or {}).get("roi"))
         except Exception as exc:
             log.warning("camera %s failed: %s", src.external_id, exc)
             continue

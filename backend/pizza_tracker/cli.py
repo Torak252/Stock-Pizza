@@ -3,6 +3,7 @@
     python -m pizza_tracker.cli init          # create tables + seed Fortune 10
     python -m pizza_tracker.cli verify        # geocode HQ addresses vs stored coords (--apply to save)
     python -m pizza_tracker.cli map           # discover nearby venues (OSM) and DOT cameras
+    python -m pizza_tracker.cli add-camera --ticker XOM --name "I-45 at Rayford" --url https://...jpg
     python -m pizza_tracker.cli market        # daily bars, earnings dates, SEC filings
     python -m pizza_tracker.cli worker        # camera counting + scoring + daily market refresh
     python -m pizza_tracker.cli study         # spike vs. price / filing report
@@ -71,15 +72,20 @@ def run_worker() -> None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     p = argparse.ArgumentParser(prog="pizza_tracker")
-    p.add_argument("command", choices=["init", "verify", "map", "market", "worker", "study", "demo"])
+    p.add_argument("command", choices=["init", "verify", "map", "add-camera", "market", "worker", "study", "demo"])
     p.add_argument("--horizon", type=int, default=5, help="study: forward-return horizon in trading days")
     p.add_argument("--apply", action="store_true", help="verify: save geocoded coordinates")
+    p.add_argument("--ticker", help="add-camera: company ticker")
+    p.add_argument("--name", help="add-camera: label, e.g. the cross streets")
+    p.add_argument("--url", help="add-camera: public still-image URL")
+    p.add_argument("--lat", type=float, help="add-camera: camera latitude (defaults to the HQ)")
+    p.add_argument("--lon", type=float, help="add-camera: camera longitude (defaults to the HQ)")
     args = p.parse_args()
 
     init_db()
     with SessionLocal() as s:  # type: Session
         seed_companies(s)
-        if args.command in ("verify", "map", "market", "worker") and _has_demo_data(s):
+        if args.command in ("verify", "map", "add-camera", "market", "worker") and _has_demo_data(s):
             sys.exit("This database holds synthetic demo data. Point SPT_DATABASE_URL at a separate DB for real collection.")
         if args.command == "demo" and _has_real_data(s):
             sys.exit("demo wipes readings and samples; refusing to run on a database with real sources.")
@@ -90,6 +96,14 @@ def main() -> None:
         elif args.command == "map":
             print(f"venues added: {pipeline.map_venues(s)}")
             print(f"cameras added: {pipeline.map_cameras(s)}")
+        elif args.command == "add-camera":
+            if not (args.ticker and args.name and args.url):
+                p.error("add-camera needs --ticker, --name and --url")
+            try:
+                src = pipeline.add_manual_camera(s, args.ticker, args.name, args.url, args.lat, args.lon)
+            except ValueError as exc:
+                sys.exit(str(exc))
+            print(f"added camera {src.id} ({src.distance_m:.0f} m from HQ). Mark its gate lanes on the dashboard.")
         elif args.command == "market":
             print(pipeline.ingest_market(s))
         elif args.command == "study":
