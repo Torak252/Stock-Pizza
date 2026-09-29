@@ -1,0 +1,34 @@
+[project]
+name = "pizza-tracker"
+version = "0.1.0"
+description = "Stock Pizza Tracker: off-hours corporate activity signals vs. market moves"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "sqlalchemy>=2.0",
+  "psycopg[binary]>=3.1",
+  "pydantic-settings>=2.2",
+  "httpx>=0.27",
+  "pandas>=2.2",
+  "numpy>=1.26",
+  "apscheduler>=3.10,<4",
+  "yfinance>=0.2.40",
+]
+
+[project.optional-dependencies]
+vision = ["ultralytics>=8.3", "opencv-python-headless>=4.9"]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["pizza_tracker*"]
+
+[tool.setuptools.package-data]
+pizza_tracker = ["seed/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

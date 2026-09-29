@@ -1,0 +1,207 @@
+"""Glue between collectors, storage and analytics. Each function is one scheduler job."""
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+import pandas as pd
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
+
+from .analytics.baseline import add_local_calendar, build_baseline, robust_z
+from .analytics.scoring import score_snapshot
+from .collectors.foot_traffic import FootTrafficProvider, SyntheticProvider
+from .config import get_settings
+from .models import ActivitySample, Company, IndexReading, SignalSource
+
+log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------- mapping (run rarely)
+def _add_source_if_new(session: Session, src: SignalSource) -> bool:
+    exists = session.scalar(select(SignalSource.id).where(
+        SignalSource.company_id == src.company_id, SignalSource.kind == src.kind, SignalSource.external_id == src.external_id
+    ))
+    if not exists:
+        session.add(src)
+    return not exists
+
+
+def map_venues(session: Session, radius_m: int = 3000, max_per_company: int = 8) -> int:
+    from .collectors.places import find_venues
+
+    added = 0
+    for company in session.scalars(select(Company)):
+        try:
+            venues = find_venues(company.lat, company.lon, radius_m)
+        except Exception as exc:  # one bad upstream must not stop the others
+            log.warning("venue lookup failed for %s: %s", company.ticker, exc)
+            continue
+        for v in venues[:max_per_company]:
+            added += _add_source_if_new(session, SignalSource(
+                company_id=company.id, kind="venue", provider="osm", external_id=v.external_id, name=v.name,
+                lat=v.lat, lon=v.lon, distance_m=round(v.distance_m), meta={"brand": v.brand, "addr": v.tags.get("addr:street")},
+            ))
+    session.commit()
+    return added
+
+
+def map_cameras(session: Session, radius_m: float = 5000) -> int:
+    from .collectors.cameras import PROVIDERS_BY_STATE
+
+    added = 0
+    for company in session.scalars(select(Company)):
+        state = company.hq_address.rsplit(",", 1)[-1].strip()[:2]
+        provider_cls = PROVIDERS_BY_STATE.get(state)
+        if not provider_cls:
+            continue
+        try:
+            nearest = provider_cls().nearest(company.lat, company.lon, radius_m)
+        except Exception as exc:
+            log.warning("camera lookup failed for %s: %s", company.ticker, exc)
+            continue
+        for cam, dist in nearest:
+            added += _add_source_if_new(session, SignalSource(
+                company_id=company.id, kind="camera", provider=cam.provider, external_id=cam.external_id, name=cam.name,
+                lat=cam.lat, lon=cam.lon, distance_m=round(dist), url=cam.image_url, meta=cam.meta,
+            ))
+    session.commit()
+    return added
+
+
+# ---------------------------------------------------------------- collection (every ~10 min)
+def collect_venue_busyness(session: Session, provider: FootTrafficProvider, now: datetime | None = None) -> int:
+    now = now or datetime.now(timezone.utc)
+    n = 0
+    for src in session.scalars(select(SignalSource).where(SignalSource.kind == "venue")):
+        local = now.astimezone(ZoneInfo(src.company.timezone))
+        value = provider.live_busyness(src.name, src.meta.get("addr") or src.company.hq_address, local)
+        if value is None:
+            continue
+        session.add(ActivitySample(ts=now, company_id=src.company_id, source_id=src.id, metric="venue_busyness", value=value))
+        n += 1
+    session.commit()
+    return n
+
+
+def collect_camera_counts(session: Session, now: datetime | None = None) -> int:
+    from .collectors.cameras import fetch_snapshot
+    from .vision.detector import count_vehicles
+
+    now = now or datetime.now(timezone.utc)
+    n = 0
+    for src in session.scalars(select(SignalSource).where(SignalSource.kind == "camera")):
+        try:
+            counts = count_vehicles(fetch_snapshot(src.url), roi=src.meta.get("roi"))
+        except Exception as exc:
+            log.warning("camera %s failed: %s", src.external_id, exc)
+            continue
+        for metric in ("vehicle_count", "delivery_vehicle_count"):
+            session.add(ActivitySample(ts=now, company_id=src.company_id, source_id=src.id, metric=metric, value=getattr(counts, metric)))
+        n += 1
+    session.commit()
+    return n
+
+
+# ---------------------------------------------------------------- scoring (every ~10 min)
+def _samples_frame(session: Session, company_id: int, since: datetime) -> pd.DataFrame:
+    rows = session.execute(
+        select(ActivitySample.ts, ActivitySample.metric, ActivitySample.value)
+        .where(ActivitySample.company_id == company_id, ActivitySample.ts >= since)
+    ).all()
+    return pd.DataFrame(rows, columns=["ts", "metric", "value"])
+
+
+def _load_company_frame(session: Session, company: Company, since: datetime) -> pd.DataFrame:
+    df = _samples_frame(session, company.id, since)
+    if df.empty:
+        return df
+    df["ts"] = pd.to_datetime(df["ts"], utc=True)
+    return add_local_calendar(df, company.timezone)
+
+
+def _score_frame(df: pd.DataFrame, company: Company, now: datetime) -> IndexReading | None:
+    """Score the current local clock hour (so far) against the same hour in past weeks."""
+    s = get_settings()
+    if df.empty:
+        return None
+    now_ts = pd.Timestamp(now)
+    cutoff = now_ts.floor("h")
+    local = now.astimezone(ZoneInfo(company.timezone))
+    # Only the same local (weekday, hour) slot informs the baseline, and only the part of that
+    # hour that has elapsed so far, so a partial hour is never compared with a full one.
+    history = df[(df["ts"] < cutoff) & (df["ts"] >= now_ts - pd.Timedelta(weeks=s.baseline_weeks))
+                 & (df["dow"] == local.weekday()) & (df["hour"] == local.hour) & (df["minute"] <= local.minute)]
+    current = df[(df["ts"] >= cutoff) & (df["ts"] <= now_ts)]
+    if current.empty or history.empty:
+        return None
+
+    # Aggregate history to one value per metric per hour so dense sources don't dominate the baseline.
+    hourly = (history.assign(bucket=history["ts"].dt.floor("h"))
+              .groupby(["metric", "bucket", "dow", "hour"], as_index=False)["value"].mean())
+    baseline = build_baseline(hourly, min_samples=s.min_baseline_samples)
+    latest = current.groupby("metric", as_index=False).agg(value=("value", "mean"))
+    latest = latest.assign(dow=local.weekday(), hour=local.hour)
+    z = robust_z(latest, baseline).set_index("metric")["z"].to_dict()
+
+    reading = score_snapshot(z, local.hour, s.z_threshold, s.off_hours_start, s.off_hours_end)
+    if reading.score is None:
+        return None
+    return IndexReading(ts=now, company_id=company.id, score=round(reading.score, 3),
+                        components=reading.components, level=reading.level, off_hours=reading.off_hours)
+
+
+def score_company(session: Session, company: Company, now: datetime | None = None) -> IndexReading | None:
+    now = now or datetime.now(timezone.utc)
+    df = _load_company_frame(session, company, now - timedelta(weeks=get_settings().baseline_weeks))
+    row = _score_frame(df, company, now)
+    if row is not None:
+        session.add(row)
+        session.commit()
+    return row
+
+
+def score_all(session: Session, now: datetime | None = None) -> list[IndexReading]:
+    return [r for c in session.scalars(select(Company)) if (r := score_company(session, c, now))]
+
+
+# ---------------------------------------------------------------- demo data
+def seed_demo(session: Session, days: int = 42, step_min: int = 30, seed: int = 7, score_days: int = 7) -> int:
+    """Fill the DB with synthetic venues + history + scored readings so the UI works offline."""
+    session.execute(delete(IndexReading))
+    session.execute(delete(ActivitySample))
+    session.commit()
+    provider = SyntheticProvider(seed=seed)
+
+    for company in session.scalars(select(Company)):
+        if not any(src.kind == "venue" for src in company.sources):
+            session.add(SignalSource(
+                company_id=company.id, kind="venue", provider="synthetic", external_id=f"demo-{company.ticker}",
+                name=f"Demo Pizza near {company.name}", lat=company.lat + 0.004, lon=company.lon + 0.004, distance_m=560,
+            ))
+    session.commit()
+
+    end = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    t = end - timedelta(days=days)
+    n = 0
+    sources = list(session.scalars(select(SignalSource).where(SignalSource.kind == "venue")))
+    while t <= end:
+        for src in sources:
+            local = t.astimezone(ZoneInfo(src.company.timezone))
+            session.add(ActivitySample(ts=t, company_id=src.company_id, source_id=src.id, metric="venue_busyness",
+                                       value=round(provider.live_busyness(src.name, "", local), 2)))
+            n += 1
+        t += timedelta(minutes=step_min)
+    session.commit()
+
+    # Score the most recent days hour-by-hour so the spike feed and charts have history.
+    for company in session.scalars(select(Company)):
+        df = _load_company_frame(session, company, end - timedelta(days=days))
+        t = end - timedelta(days=score_days)
+        while t <= end:
+            if (row := _score_frame(df, company, t)) is not None:
+                session.add(row)
+            t += timedelta(hours=1)
+    session.commit()
+    return n

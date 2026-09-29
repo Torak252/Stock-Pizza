@@ -1,0 +1,12 @@
+[
+  {"rank": 1,  "ticker": "WMT",   "name": "Walmart",            "hq_address": "Walmart Home Office, Bentonville, AR",       "lat": 36.3656, "lon": -94.2139,  "timezone": "America/Chicago"},
+  {"rank": 2,  "ticker": "AMZN",  "name": "Amazon",             "hq_address": "410 Terry Ave N, Seattle, WA",               "lat": 47.6223, "lon": -122.3366, "timezone": "America/Los_Angeles"},
+  {"rank": 3,  "ticker": "UNH",   "name": "UnitedHealth Group", "hq_address": "9900 Bren Rd E, Minnetonka, MN",             "lat": 44.8993, "lon": -93.4065,  "timezone": "America/Chicago"},
+  {"rank": 4,  "ticker": "AAPL",  "name": "Apple",              "hq_address": "One Apple Park Way, Cupertino, CA",          "lat": 37.3349, "lon": -122.0090, "timezone": "America/Los_Angeles"},
+  {"rank": 5,  "ticker": "CVS",   "name": "CVS Health",         "hq_address": "One CVS Dr, Woonsocket, RI",                 "lat": 41.9990, "lon": -71.5020,  "timezone": "America/New_York"},
+  {"rank": 6,  "ticker": "BRK-B", "name": "Berkshire Hathaway", "hq_address": "3555 Farnam St, Omaha, NE",                  "lat": 41.2587, "lon": -95.9702,  "timezone": "America/Chicago"},
+  {"rank": 7,  "ticker": "GOOGL", "name": "Alphabet",           "hq_address": "1600 Amphitheatre Pkwy, Mountain View, CA",  "lat": 37.4220, "lon": -122.0841, "timezone": "America/Los_Angeles"},
+  {"rank": 8,  "ticker": "XOM",   "name": "Exxon Mobil",        "hq_address": "22777 Springwoods Village Pkwy, Spring, TX", "lat": 30.0850, "lon": -95.4240,  "timezone": "America/Chicago"},
+  {"rank": 9,  "ticker": "MCK",   "name": "McKesson",           "hq_address": "6555 State Hwy 161, Irving, TX",             "lat": 32.9030, "lon": -96.9790,  "timezone": "America/Chicago"},
+  {"rank": 10, "ticker": "COR",   "name": "Cencora",            "hq_address": "1 W First Ave, Conshohocken, PA",            "lat": 40.0759, "lon": -75.3031,  "timezone": "America/New_York"}
+]
