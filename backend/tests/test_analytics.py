@@ -56,10 +56,11 @@ def test_baseline_requires_min_samples():
     assert build_baseline(hist, min_samples=4).empty
 
 
-def test_weekend_spike_maps_to_next_session():
+def test_spike_maps_to_last_close_before_it():
     days = pd.bdate_range("2026-03-02", periods=10, tz="UTC")
-    out = align_to_trading_days(pd.DatetimeIndex([pd.Timestamp("2026-03-07", tz="UTC")]), days)  # Saturday
-    assert out[0] == pd.Timestamp("2026-03-09", tz="UTC")  # Monday
+    sat, tue = pd.Timestamp("2026-03-07", tz="UTC"), pd.Timestamp("2026-03-10", tz="UTC")
+    out = align_to_trading_days(pd.DatetimeIndex([sat, tue]), days)
+    assert list(out) == [pd.Timestamp("2026-03-06", tz="UTC"), tue]  # Friday, and Tuesday itself
 
 
 def test_volatility_study_detects_planted_effect():
@@ -67,7 +68,7 @@ def test_volatility_study_detects_planted_effect():
     idx = pd.bdate_range("2024-01-01", periods=400, tz="UTC")
     rets = rng.normal(0, 0.005, len(idx))
     spikes = idx[20:380:30]
-    for d in spikes:  # plant big moves right after each spike
+    for d in spikes:  # plant a big move in the session right after each spike evening
         rets[idx.get_loc(d) + 1] = 0.06
     close = pd.Series(100 * np.exp(np.cumsum(rets)), index=idx)
     res = volatility_study(close, spikes, horizon=2, n_perm=2000)

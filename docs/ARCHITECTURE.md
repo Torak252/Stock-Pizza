@@ -1,6 +1,8 @@
-# Stock Pizza Tracker: Phase 1 Architecture & Technical Spec
+# Stock Pizza Tracker: Architecture & Technical Spec
 
 ## 0. Goal and honest framing
+
+**Operating constraints (decided):** free data only, research only (no trading), and it runs locally.
 
 Detect **statistically unusual late-night activity** (7 PM to 3 AM, HQ local time) around Fortune 500 headquarters and test whether it **precedes** price volatility or unscheduled corporate events (8-K, M&A filings).
 
@@ -15,14 +17,14 @@ Three constraints shape the design:
 | Layer | Choice | Why |
 |---|---|---|
 | API | **FastAPI** (Python 3.11+) | Same language as the data and ML code; async-ready; OpenAPI docs for free |
-| Scheduling | **APScheduler** (Phase 1) → **Prefect** or **Celery + Redis** (Phase 2+) | One process is enough for 10 HQs. Move to a queue once camera/CV fan-out needs workers |
+| Scheduling | **APScheduler** | One local process is enough for 10 HQs |
 | Scraping / HTTP | **httpx** + shared `PoliteClient` | Per-host rate limit, backoff, `Retry-After`, honest UA. Every Phase 1 source is an API, so no headless browser is needed |
-| Storage | **PostgreSQL 16 + TimescaleDB** (SQLite for dev/tests) | Hypertables for time series, retention policies, continuous aggregates for hourly rollups |
+| Storage | **SQLite** by default; PostgreSQL + TimescaleDB optional via Docker | SQLite handles 10 HQs × a few metrics every 5 min for years. Switch when scaling to the Fortune 500 |
 | ORM | **SQLAlchemy 2.0** | Works on both SQLite and Postgres |
 | Computer vision | **Ultralytics YOLO11n** + **OpenCV** (optional `[vision]` extra) | Runs on CPU for stills every 2–5 min. Fine-tune later for a `delivery_vehicle` class |
-| Market data | **yfinance** (research) → Polygon / Alpaca (prod); **SEC EDGAR** submissions API | EDGAR is official, free and timestamped to the second, which makes it the best label source |
+| Market data | **yfinance** + **SEC EDGAR** submissions API | Both free. EDGAR is official and timestamped to the second, which makes it the best label source |
 | Frontend | **Next.js 16 (App Router) + React 19 + Tailwind v4 + react-leaflet** | Leaflet + CARTO dark tiles need no API key. Swap to Mapbox GL later if you want 3D/heatmaps |
-| Deploy | **Docker Compose** (db, api, worker, web) | One command locally; the same images deploy to Fly.io / Render / a single VPS |
+| Run | Local: `uvicorn` + `cli worker` + `npm run dev` | Docker Compose is kept as an option |
 
 ## 2. Data pipeline strategy: legal and reliable acquisition
 
@@ -31,14 +33,14 @@ Three constraints shape the design:
 | Signal | Source | Access status | Notes |
 |---|---|---|---|
 | Venue discovery | OpenStreetMap **Overpass API** | ✅ Open (ODbL, attribution required) | One-off mapping job. Cache results for weeks |
-| Venue busyness | **BestTime.app** (or Advan/Dewey for historical foot traffic) | ✅ Licensed, paid | This replaces Google Popular Times |
+| ~~Venue busyness~~ | BestTime / Advan / Dewey | 💲 Paid only | **Not used** (free-data constraint). There is no free, terms-compliant live busyness source. Only `cli demo` uses synthetic busyness |
 | ~~Google Popular Times~~ | — | ❌ No API; scraping Maps violates Google ToS | Deliberately **not** implemented. `populartimes`-style scrapers break often and create legal exposure |
 | ~~Domino's / Papa John's order data~~ | — | ❌ Private, ToS-protected | Not available. We watch the *venue's busyness*, not its orders |
 | Traffic cameras (CA) | **Caltrans CWWP2** CCTV JSON | ✅ Public, documented | Stills refresh every 1–5 min. Poll no faster than that |
 | Traffic cameras (WA) | **WSDOT Traveler API** | ✅ Free access code | |
 | Traffic cameras (TX, MN, AR, NE, RI, PA) | State 511 / DOT feeds | ⚠️ To be added per state; check each one's terms | Some states only allow embedding, not redistribution. Store counts, never frames |
-| Traffic speed/density | TomTom / HERE traffic flow APIs | ✅ Paid, free tier | Good fallback where no camera sits near a gate |
-| Prices | yfinance → Polygon/Alpaca | ⚠️ yfinance is unofficial | OK for research. Use a licensed feed for anything live |
+| Traffic speed/density | TomTom / HERE traffic flow APIs | ⚠️ Free tiers exist, but their terms limit use | Not used yet. Candidate fallback where no camera sits near a gate |
+| Prices | yfinance | ⚠️ Unofficial Yahoo wrapper | Fine for personal research, which is the scope |
 | Filings | **SEC EDGAR** | ✅ Official; ≤10 req/s; UA must include a contact email | `SPT_CONTACT_EMAIL` is required |
 
 **Reliability tactics** (in `collectors/http.py`):
@@ -51,7 +53,7 @@ Three constraints shape the design:
 **Privacy & compliance:**
 - Camera frames are decoded in memory, counted, and discarded (`SPT_STORE_CAMERA_FRAMES=false`). No plates, faces or images are stored.
 - We aggregate at the campus level only and never track individuals.
-- **MNPI:** observing public roads and public busyness data is generally treated as alternative data, not inside information. Before any live trading use, get a securities lawyer to review the sources, and keep a source log (the `provider` column) for audit.
+- **Research only:** nothing here places trades. If that ever changes, get a securities lawyer to review the sources first; the `provider` column is the audit trail.
 
 ## 3. Analytics
 
@@ -62,16 +64,34 @@ Three constraints shape the design:
 Levels are elevated ≥ 2, high ≥ 3, extreme ≥ 4. **Alerts only fire during off-hours** (19:00–03:00 HQ local).
 
 **Correlation engine** (`analytics/correlation.py`):
-- *Volatility study:* mean |h-day forward log return| after spike nights vs a permutation null of random nights. A weekend spike maps to Monday's session.
+- *Volatility study:* mean |h-day forward log return| after spike evenings vs a permutation null of random days. Returns are measured from the last close *before* the spike (a Monday-night spike from Monday's close, a Saturday spike from Friday's), so the test never uses a price set after the spike.
+- *Scheduled vs surprise:* earnings dates, 10-Qs and 10-Ks are marked scheduled. The report counts spike evenings with no scheduled event in the next 10 days ("unexplained"), and compares how often 8-Ks and M&A forms follow a spike against how often they follow any trading day.
+- Run it with `python -m pizza_tracker.cli study`.
 - *Precedence:* the share of spikes followed by an 8-K/M&A filing within k days, compared with the base rate.
 - Planned for Phase 3: control for the market (SPY-adjusted abnormal returns), apply Benjamini–Hochberg correction across the 10 tickers × horizons, and use walk-forward evaluation only.
 
-## 4. Phase roadmap
+## 4. Signal coverage with free data
+
+Live signals come from **DOT cameras only**, counted with YOLO:
+
+| HQ | Free camera feed | Status |
+|---|---|---|
+| Apple (Cupertino), Alphabet (Mountain View) | Caltrans District 4 | ✅ Implemented |
+| Amazon (Seattle) | WSDOT (free access code) | ✅ Implemented |
+| Exxon Mobil, McKesson (TX) | TxDOT / DriveTexas | ⏳ Needs a provider |
+| UnitedHealth (MN) | MnDOT / 511MN | ⏳ Needs a provider |
+| Cencora (PA) | 511PA | ⏳ Needs a provider |
+| CVS (RI) | RIDOT | ⏳ Needs a provider |
+| Berkshire (NE), Walmart (AR) | Nebraska 511 / IDriveArkansas | ⏳ Needs a provider; freeway cameras may be too far from the HQ to help |
+
+Until more providers exist, only 3 of the 10 HQs produce live readings.
+
+## 5. Phase roadmap
 
 | Phase | Deliverable |
 |---|---|
-| **1 (this PR)** | Schema, collectors, baseline + POI scoring, event-study code, REST API, dashboard, synthetic demo, tests |
-| 2 | Verify HQ coordinates and draw gate ROIs; add BestTime key; add TX/MN/PA/RI/NE/AR camera providers; enable YOLO counting; start the 24/7 collector |
-| 3 | EDGAR + earnings ingestion job; SPY-adjusted event study; predictive dashboard page |
-| 4 | Scale to Fortune 500 (CSV import + geocoding); queue-based workers; alerting (Discord, reusing `reporting/discord.py`) |
-| 5 | Optional: expose POI as a feature to the existing Algotrader strategies, paper-trading only |
+| **1** | Schema, collectors, baseline + POI scoring, event-study code, REST API, dashboard, synthetic demo, tests |
+| **2** | Free-data, local-first mode; daily market + EDGAR ingestion; `cli study` report; demo/real database guards |
+| 3 | Verify HQ coordinates and mark gate lanes on each camera; add TX/MN/PA/RI camera providers; start collecting 24/7 |
+| 4 | After ~3 months of data: SPY-adjusted returns, Benjamini–Hochberg correction across tickers, predictive dashboard page |
+| 5 | Scale toward the Fortune 500 (CSV import + geocoding, Postgres, queue-based workers) |

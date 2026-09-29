@@ -14,10 +14,8 @@ class Settings(BaseSettings):
     user_agent: str = "StockPizzaTracker/0.1 (research; contact: set SPT_CONTACT_EMAIL)"
     contact_email: str = ""
 
-    # Upstream credentials (all optional; collectors that lack a key are skipped).
+    # Free upstream credentials (optional; collectors that lack one are skipped).
     wsdot_access_code: str = ""      # free: https://wsdot.wa.gov/traffic/api/
-    besttime_api_key: str = ""       # licensed foot-traffic provider: https://besttime.app
-    alpha_vantage_api_key: str = ""  # optional; yfinance is the default market source
 
     # Politeness defaults applied by the shared HTTP client.
     default_min_interval_s: float = 2.0   # per-host minimum spacing between requests

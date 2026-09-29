@@ -5,3 +5,6 @@ next-env.d.ts
 *.db
 .env
 *.pt
+__pycache__/
+.venv/
+.pytest_cache/

@@ -32,9 +32,13 @@ def forward_abs_returns(close: pd.Series, horizon: int) -> pd.Series:
 
 
 def align_to_trading_days(spike_dates: pd.DatetimeIndex, trading_days: pd.DatetimeIndex) -> pd.DatetimeIndex:
-    """A spike at 1 AM Tuesday informs Tuesday's session; one on Saturday informs Monday's."""
-    pos = trading_days.searchsorted(spike_dates.normalize())
-    pos = pos[pos < len(trading_days)]
+    """Map each spike evening to the last session that closed before it.
+
+    Forward returns are then measured from a price nobody could have traded on the spike yet:
+    a Monday-night spike is measured from Monday's close, a Saturday spike from Friday's.
+    """
+    pos = trading_days.searchsorted(spike_dates.normalize(), side="right") - 1
+    pos = pos[pos >= 0]
     return trading_days[np.unique(pos)]
 
 

@@ -11,9 +11,9 @@ from sqlalchemy.orm import Session
 
 from .analytics.baseline import add_local_calendar, build_baseline, robust_z
 from .analytics.scoring import score_snapshot
-from .collectors.foot_traffic import FootTrafficProvider, SyntheticProvider
+from .collectors.foot_traffic import SyntheticProvider
 from .config import get_settings
-from .models import ActivitySample, Company, IndexReading, SignalSource
+from .models import ActivitySample, Company, CorporateEvent, IndexReading, PriceBar, SignalSource
 
 log = logging.getLogger(__name__)
 
@@ -70,21 +70,7 @@ def map_cameras(session: Session, radius_m: float = 5000) -> int:
     return added
 
 
-# ---------------------------------------------------------------- collection (every ~10 min)
-def collect_venue_busyness(session: Session, provider: FootTrafficProvider, now: datetime | None = None) -> int:
-    now = now or datetime.now(timezone.utc)
-    n = 0
-    for src in session.scalars(select(SignalSource).where(SignalSource.kind == "venue")):
-        local = now.astimezone(ZoneInfo(src.company.timezone))
-        value = provider.live_busyness(src.name, src.meta.get("addr") or src.company.hq_address, local)
-        if value is None:
-            continue
-        session.add(ActivitySample(ts=now, company_id=src.company_id, source_id=src.id, metric="venue_busyness", value=value))
-        n += 1
-    session.commit()
-    return n
-
-
+# ---------------------------------------------------------------- collection (every ~5 min)
 def collect_camera_counts(session: Session, now: datetime | None = None) -> int:
     from .collectors.cameras import fetch_snapshot
     from .vision.detector import count_vehicles
@@ -164,6 +150,55 @@ def score_company(session: Session, company: Company, now: datetime | None = Non
 
 def score_all(session: Session, now: datetime | None = None) -> list[IndexReading]:
     return [r for c in session.scalars(select(Company)) if (r := score_company(session, c, now))]
+
+
+# ---------------------------------------------------------------- market data (daily)
+# Filings that are expected on a calendar; everything else (8-K, M&A forms) counts as a surprise.
+SCHEDULED_FORMS = {"10-Q", "10-K"}
+
+
+def _add_event_if_new(session: Session, ticker: str, ts: datetime, kind: str, scheduled: bool, url: str | None = None) -> bool:
+    exists = session.scalar(select(CorporateEvent.id).where(
+        CorporateEvent.ticker == ticker, CorporateEvent.kind == kind, CorporateEvent.ts == ts
+    ))
+    if not exists:
+        session.add(CorporateEvent(ticker=ticker, ts=ts, kind=kind, scheduled=scheduled, url=url))
+    return not exists
+
+
+def ingest_market(session: Session, period: str = "2y") -> dict[str, int]:
+    """Daily bars + earnings dates (yfinance) and filings (SEC EDGAR, if SPT_CONTACT_EMAIL is set)."""
+    from .collectors import market
+
+    edgar = market.EdgarClient() if get_settings().contact_email else None
+    if edgar is None:
+        log.info("SPT_CONTACT_EMAIL not set; skipping SEC EDGAR filings")
+    counts = {"bars": 0, "events": 0}
+    for company in session.scalars(select(Company)):
+        t = company.ticker
+        try:
+            bars = market.fetch_daily_bars(t, period)
+            have = set(session.scalars(select(PriceBar.ts).where(PriceBar.ticker == t, PriceBar.interval == "1d")))
+            have = {h.replace(tzinfo=None) for h in have}
+            for ts, row in bars.iterrows():
+                ts = ts.to_pydatetime()
+                if ts.replace(tzinfo=None) in have:
+                    continue
+                session.add(PriceBar(ticker=t, ts=ts, interval="1d", open=row.open, high=row.high,
+                                     low=row.low, close=row.close, volume=row.volume))
+                counts["bars"] += 1
+            for ts in market.fetch_earnings_dates(t):
+                counts["events"] += _add_event_if_new(session, t, ts, "earnings", scheduled=True)
+        except Exception as exc:
+            log.warning("yfinance failed for %s: %s", t, exc)
+        if edgar:
+            try:
+                for f in edgar.recent_filings(t):
+                    counts["events"] += _add_event_if_new(session, t, f["ts"], f["form"], f["form"] in SCHEDULED_FORMS)
+            except Exception as exc:
+                log.warning("EDGAR failed for %s: %s", t, exc)
+        session.commit()
+    return counts
 
 
 # ---------------------------------------------------------------- demo data

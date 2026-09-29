@@ -36,7 +36,7 @@ class SignalSource(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
     kind: Mapped[str] = mapped_column(String(32))  # "venue" | "camera" | "traffic"
-    provider: Mapped[str] = mapped_column(String(32))  # "osm" | "caltrans" | "wsdot" | "besttime" ...
+    provider: Mapped[str] = mapped_column(String(32))  # "osm" | "caltrans" | "wsdot" | "synthetic" ...
     external_id: Mapped[str] = mapped_column(String(128))
     name: Mapped[str] = mapped_column(String(256))
     lat: Mapped[float] = mapped_column(Float)

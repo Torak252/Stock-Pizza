@@ -2,31 +2,43 @@
 
     python -m pizza_tracker.cli init          # create tables + seed Fortune 10
     python -m pizza_tracker.cli map           # discover nearby venues (OSM) and DOT cameras
-    python -m pizza_tracker.cli demo          # synthetic history so the dashboard works offline
-    python -m pizza_tracker.cli worker        # run the collection / scoring scheduler
+    python -m pizza_tracker.cli market        # daily bars, earnings dates, SEC filings
+    python -m pizza_tracker.cli worker        # camera counting + scoring + daily market refresh
+    python -m pizza_tracker.cli study         # spike vs. price / filing report
+    python -m pizza_tracker.cli demo          # synthetic data so the dashboard works offline
 """
 from __future__ import annotations
 
 import argparse
 import logging
+import sys
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import pipeline
 from .db import SessionLocal, init_db
+from .models import SignalSource
 from .seed import seed_companies
 
 log = logging.getLogger("pizza_tracker")
 
 
+def _has_demo_data(session: Session) -> bool:
+    return session.scalar(select(SignalSource.id).where(SignalSource.provider == "synthetic").limit(1)) is not None
+
+
+def _has_real_data(session: Session) -> bool:
+    return session.scalar(select(SignalSource.id).where(SignalSource.provider != "synthetic").limit(1)) is not None
+
+
 def run_worker() -> None:
     from apscheduler.schedulers.blocking import BlockingScheduler
 
-    from .collectors.foot_traffic import BestTimeProvider, SyntheticProvider
-    from .config import get_settings
-
-    provider = BestTimeProvider() if get_settings().besttime_api_key else SyntheticProvider()
-    log.info("foot-traffic provider: %s", provider.name)
+    try:
+        import ultralytics  # noqa: F401
+    except ImportError:
+        sys.exit('Camera counting needs the vision extra: pip install -e ".[vision]"')
 
     def job(fn, *args):
         def run():
@@ -36,35 +48,41 @@ def run_worker() -> None:
         return run
 
     sched = BlockingScheduler(timezone="UTC")
-    sched.add_job(job(pipeline.collect_venue_busyness, provider), "interval", minutes=10, max_instances=1)
+    sched.add_job(job(pipeline.collect_camera_counts), "interval", minutes=5, max_instances=1)
     sched.add_job(job(pipeline.score_all), "interval", minutes=10, max_instances=1)
-    try:
-        import ultralytics  # noqa: F401
-
-        sched.add_job(job(pipeline.collect_camera_counts), "interval", minutes=5, max_instances=1)
-    except ImportError:
-        log.info("ultralytics not installed; camera counting disabled")
+    # Refresh market data once a day, after US close (22:30 UTC), and once at startup.
+    sched.add_job(job(pipeline.ingest_market), "cron", hour=22, minute=30)
+    sched.add_job(job(pipeline.ingest_market))
     sched.start()
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     p = argparse.ArgumentParser(prog="pizza_tracker")
-    p.add_argument("command", choices=["init", "map", "demo", "worker"])
+    p.add_argument("command", choices=["init", "map", "market", "worker", "study", "demo"])
+    p.add_argument("--horizon", type=int, default=5, help="study: forward-return horizon in trading days")
     args = p.parse_args()
 
     init_db()
     with SessionLocal() as s:  # type: Session
+        seed_companies(s)
+        if args.command in ("map", "market", "worker") and _has_demo_data(s):
+            sys.exit("This database holds synthetic demo data. Point SPT_DATABASE_URL at a separate DB for real collection.")
+        if args.command == "demo" and _has_real_data(s):
+            sys.exit("demo wipes readings and samples; refusing to run on a database with real sources.")
         if args.command == "init":
-            print(f"seeded {seed_companies(s)} companies")
+            print("database ready")
         elif args.command == "map":
             print(f"venues added: {pipeline.map_venues(s)}")
             print(f"cameras added: {pipeline.map_cameras(s)}")
+        elif args.command == "market":
+            print(pipeline.ingest_market(s))
+        elif args.command == "study":
+            from .study import format_report, run_study
+
+            print(format_report(run_study(s, horizon=args.horizon), args.horizon))
         elif args.command == "demo":
-            seed_companies(s)
             print(f"synthetic samples: {pipeline.seed_demo(s)}")
-        elif args.command == "worker":
-            seed_companies(s)
     if args.command == "worker":
         run_worker()
 

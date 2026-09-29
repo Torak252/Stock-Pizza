@@ -1,3 +1,4 @@
+# Optional. The default way to run is locally without Docker (see README).
 services:
   db:
     image: timescale/timescaledb:latest-pg16
@@ -17,13 +18,15 @@ services:
 
   api:
     build: ./backend
-    env_file: .env
+    env_file: { path: ./backend/.env, required: false }
+    environment: &pg { SPT_DATABASE_URL: "postgresql+psycopg://pizza:pizza@db:5432/pizza" }
     ports: ["8000:8000"]
     depends_on: { db: { condition: service_healthy } }
 
   worker:
     build: ./backend
-    env_file: .env
+    env_file: { path: ./backend/.env, required: false }
+    environment: *pg
     command: ["python", "-m", "pizza_tracker.cli", "worker"]
     depends_on: { db: { condition: service_healthy } }
 
