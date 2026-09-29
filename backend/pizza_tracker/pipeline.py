@@ -70,6 +70,39 @@ def map_cameras(session: Session, radius_m: float = 5000) -> int:
     return added
 
 
+# ---------------------------------------------------------------- HQ verification (manual)
+def verify_hqs(session: Session, apply: bool = False, geocoder=None) -> list[dict]:
+    """Geocode each HQ address and compare it with the stored coordinates.
+
+    With apply=True, geocoded coordinates replace the stored ones, the company is marked
+    verified, and source distances are recomputed. Review the dry-run table first:
+    geocoders sometimes pick a mailing address rather than the campus.
+    """
+    from .collectors.geocode import geocode
+    from .geo import haversine_m
+
+    geocoder = geocoder or geocode
+    rows = []
+    for company in session.scalars(select(Company).order_by(Company.fortune_rank)):
+        try:
+            hit = geocoder(company.hq_address)
+        except Exception as exc:
+            log.warning("geocode failed for %s: %s", company.ticker, exc)
+            hit = None
+        row = {"ticker": company.ticker, "address": company.hq_address, "stored": (company.lat, company.lon),
+               "geocoded": None, "shift_m": None, "match": None}
+        if hit:
+            row.update(geocoded=(round(hit.lat, 5), round(hit.lon, 5)), match=hit.display_name,
+                       shift_m=round(haversine_m(company.lat, company.lon, hit.lat, hit.lon)))
+            if apply:
+                company.lat, company.lon, company.coords_verified = round(hit.lat, 5), round(hit.lon, 5), True
+                for src in company.sources:
+                    src.distance_m = round(haversine_m(company.lat, company.lon, src.lat, src.lon))
+        rows.append(row)
+    session.commit()
+    return rows
+
+
 # ---------------------------------------------------------------- collection (every ~5 min)
 def collect_camera_counts(session: Session, now: datetime | None = None) -> int:
     from .collectors.cameras import fetch_snapshot

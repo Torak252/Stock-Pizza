@@ -30,28 +30,65 @@ def _model(weights: str = "yolo11n.pt"):
     return YOLO(weights)
 
 
-def count_vehicles(image_bytes: bytes, conf: float = 0.35, roi: tuple[float, float, float, float] | None = None) -> FrameCounts:
-    """roi = (x1, y1, x2, y2) as fractions of the frame, e.g. just the lanes into the campus gate."""
+Roi = tuple[float, float, float, float]
+
+
+def _in_roi(box: list[float], w: int, h: int, roi: Roi | None) -> bool:
+    if not roi:
+        return True
+    cx, cy = (box[0] + box[2]) / 2 / w, (box[1] + box[3]) / 2 / h
+    return roi[0] <= cx <= roi[2] and roi[1] <= cy <= roi[3]
+
+
+def _detect(image_bytes: bytes, conf: float):
     import cv2
     import numpy as np
 
     frame = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
         raise ValueError("could not decode camera frame")
-    h, w = frame.shape[:2]
     result = _model()(frame, conf=conf, classes=list(COCO_VEHICLES), verbose=False)[0]
+    boxes = [(box, COCO_VEHICLES[int(cls)]) for box, cls in zip(result.boxes.xyxy.tolist(), result.boxes.cls.tolist())]
+    return frame, boxes
 
-    by_class: dict[str, int] = {}
-    for box, cls in zip(result.boxes.xyxy.tolist(), result.boxes.cls.tolist()):
-        if roi:
-            cx, cy = (box[0] + box[2]) / 2 / w, (box[1] + box[3]) / 2 / h
-            if not (roi[0] <= cx <= roi[2] and roi[1] <= cy <= roi[3]):
-                continue
-        name = COCO_VEHICLES[int(cls)]
-        by_class[name] = by_class.get(name, 0) + 1
 
+def _counts(by_class: dict[str, int]) -> FrameCounts:
     return FrameCounts(
         vehicle_count=sum(by_class.values()),
         delivery_vehicle_count=sum(v for k, v in by_class.items() if k in DELIVERY_PROXY),
         by_class=by_class,
     )
+
+
+def count_vehicles(image_bytes: bytes, conf: float = 0.35, roi: Roi | None = None) -> FrameCounts:
+    """roi = (x1, y1, x2, y2) as fractions of the frame, e.g. just the lanes into the campus gate."""
+    frame, boxes = _detect(image_bytes, conf)
+    h, w = frame.shape[:2]
+    by_class: dict[str, int] = {}
+    for box, name in boxes:
+        if _in_roi(box, w, h, roi):
+            by_class[name] = by_class.get(name, 0) + 1
+    return _counts(by_class)
+
+
+def annotate(image_bytes: bytes, conf: float = 0.35, roi: Roi | None = None) -> tuple[bytes, FrameCounts]:
+    """Draw the ROI and every detection (green = counted, grey = outside ROI) for manual review."""
+    import cv2
+
+    frame, boxes = _detect(image_bytes, conf)
+    h, w = frame.shape[:2]
+    by_class: dict[str, int] = {}
+    if roi:
+        cv2.rectangle(frame, (int(roi[0] * w), int(roi[1] * h)), (int(roi[2] * w), int(roi[3] * h)), (0, 165, 255), 2)
+    for box, name in boxes:
+        inside = _in_roi(box, w, h, roi)
+        if inside:
+            by_class[name] = by_class.get(name, 0) + 1
+        color = (0, 200, 0) if inside else (150, 150, 150)
+        x1, y1, x2, y2 = map(int, box)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
+        cv2.putText(frame, name, (x1, max(y1 - 3, 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+    ok, jpg = cv2.imencode(".jpg", frame)
+    if not ok:
+        raise ValueError("could not encode preview")
+    return jpg.tobytes(), _counts(by_class)

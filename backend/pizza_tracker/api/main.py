@@ -1,11 +1,16 @@
-"""Read-only REST API consumed by the Next.js dashboard."""
+"""REST API for the Next.js dashboard.
+
+Everything is read-only except camera ROI editing. The API has no auth and is meant to stay on
+localhost (uvicorn's default bind); don't expose it on a public interface.
+"""
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -20,7 +25,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Stock Pizza Tracker", version="0.1.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "PUT"], allow_headers=["*"])
 
 
 def _latest_readings(session: Session) -> dict[int, IndexReading]:
@@ -71,8 +76,8 @@ def _company_or_404(session: Session, ticker: str) -> Company:
 def sources(ticker: str, session: Session = Depends(get_session)) -> list[dict]:
     c = _company_or_404(session, ticker)
     return [
-        {"kind": s.kind, "provider": s.provider, "name": s.name, "lat": s.lat, "lon": s.lon,
-         "distance_m": s.distance_m, "url": s.url}
+        {"id": s.id, "kind": s.kind, "provider": s.provider, "name": s.name, "lat": s.lat, "lon": s.lon,
+         "distance_m": s.distance_m, "url": s.url, "roi": (s.meta or {}).get("roi")}
         for s in session.scalars(select(SignalSource).where(SignalSource.company_id == c.id).order_by(SignalSource.distance_m))
     ]
 
@@ -107,3 +112,60 @@ def spikes(limit: int = Query(50, le=500), session: Session = Depends(get_sessio
         .order_by(IndexReading.ts.desc()).limit(limit)
     ).all()
     return [{"ticker": t, "name": n, "timezone": tz, **_reading_dict(r)} for r, t, n, tz in rows]
+
+
+class Roi(BaseModel):
+    """Gate-lane box as fractions of the frame; null clears it."""
+
+    x1: float = Field(ge=0, le=1)
+    y1: float = Field(ge=0, le=1)
+    x2: float = Field(ge=0, le=1)
+    y2: float = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def _ordered(self):
+        if self.x2 - self.x1 < 0.02 or self.y2 - self.y1 < 0.02:
+            raise ValueError("ROI must have x1 < x2 and y1 < y2, and be at least 2% of the frame on each side")
+        return self
+
+
+def _camera_or_404(session: Session, source_id: int) -> SignalSource:
+    src = session.get(SignalSource, source_id)
+    if not src or src.kind != "camera":
+        raise HTTPException(404, f"no camera source {source_id}")
+    return src
+
+
+@app.put("/sources/{source_id}/roi")
+def set_roi(source_id: int, roi: Roi | None = None, session: Session = Depends(get_session)) -> dict:
+    src = _camera_or_404(session, source_id)
+    meta = dict(src.meta or {})  # new dict so SQLAlchemy notices the JSON change
+    if roi is None:
+        meta.pop("roi", None)
+    else:
+        meta["roi"] = [round(v, 4) for v in (roi.x1, roi.y1, roi.x2, roi.y2)]
+    src.meta = meta
+    session.commit()
+    return {"id": src.id, "roi": meta.get("roi")}
+
+
+@app.get("/sources/{source_id}/preview", responses={200: {"content": {"image/jpeg": {}}}})
+def preview(source_id: int, session: Session = Depends(get_session)) -> Response:
+    """Live frame with YOLO detections and the ROI drawn, plus counts in X-Counts headers."""
+    import importlib.util
+
+    from ..collectors.cameras import fetch_snapshot
+    from ..vision.detector import annotate
+
+    src = _camera_or_404(session, source_id)
+    if not all(importlib.util.find_spec(m) for m in ("cv2", "ultralytics")):
+        raise HTTPException(501, 'preview needs the vision extra: pip install -e ".[vision]"')
+    try:
+        jpg, counts = annotate(fetch_snapshot(src.url), roi=(src.meta or {}).get("roi"))
+    except Exception as exc:
+        raise HTTPException(502, f"camera fetch or detection failed: {exc}")
+    return Response(jpg, media_type="image/jpeg", headers={
+        "X-Vehicle-Count": str(counts.vehicle_count),
+        "X-Delivery-Count": str(counts.delivery_vehicle_count),
+        "Access-Control-Expose-Headers": "X-Vehicle-Count, X-Delivery-Count",
+    })

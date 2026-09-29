@@ -47,3 +47,11 @@ def test_parse_submissions_filters_forms():
     out = parse_submissions(payload)
     assert [r["form"] for r in out] == ["8-K", "10-Q"]
     assert out[0]["ts"].hour == 16
+
+
+def test_parse_nominatim():
+    from pizza_tracker.collectors.geocode import parse_nominatim
+
+    hit = parse_nominatim([{"lat": "37.3346", "lon": "-122.0090", "display_name": "Apple Park, Cupertino", "osm_type": "way"}])
+    assert (hit.lat, hit.lon, hit.osm_type) == (37.3346, -122.009, "way")
+    assert parse_nominatim([]) is None

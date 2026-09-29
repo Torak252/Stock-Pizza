@@ -26,7 +26,10 @@ export interface Spike extends Reading {
   timezone: string;
 }
 
+export type Roi = [number, number, number, number]; // x1, y1, x2, y2 as fractions of the frame
+
 export interface Source {
+  id: number;
   kind: "venue" | "camera" | "traffic";
   provider: string;
   name: string;
@@ -34,6 +37,13 @@ export interface Source {
   lon: number;
   distance_m: number;
   url: string | null;
+  roi: Roi | null;
+}
+
+export interface Preview {
+  imageUrl: string; // object URL; caller revokes it
+  vehicles: number;
+  delivery: number;
 }
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -49,6 +59,27 @@ export const api = {
   spikes: (limit = 50) => get<Spike[]>(`/spikes?limit=${limit}`),
   readings: (ticker: string, hours = 168) => get<Reading[]>(`/companies/${ticker}/readings?hours=${hours}`),
   sources: (ticker: string) => get<Source[]>(`/companies/${ticker}/sources`),
+
+  async setRoi(sourceId: number, roi: Roi | null): Promise<Roi | null> {
+    const body = roi ? { x1: roi[0], y1: roi[1], x2: roi[2], y2: roi[3] } : undefined;
+    const res = await fetch(`${BASE}/sources/${sourceId}/roi`, {
+      method: "PUT",
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) throw new Error(`save ROI: HTTP ${res.status} ${await res.text()}`);
+    return (await res.json()).roi;
+  },
+
+  async preview(sourceId: number): Promise<Preview> {
+    const res = await fetch(`${BASE}/sources/${sourceId}/preview`, { cache: "no-store" });
+    if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail ?? `HTTP ${res.status}`);
+    return {
+      imageUrl: URL.createObjectURL(await res.blob()),
+      vehicles: Number(res.headers.get("X-Vehicle-Count") ?? 0),
+      delivery: Number(res.headers.get("X-Delivery-Count") ?? 0),
+    };
+  },
 };
 
 export const LEVEL_STYLE: Record<Level, { hex: string; badge: string }> = {

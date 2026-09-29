@@ -33,6 +33,7 @@ Three constraints shape the design:
 | Signal | Source | Access status | Notes |
 |---|---|---|---|
 | Venue discovery | OpenStreetMap **Overpass API** | ✅ Open (ODbL, attribution required) | One-off mapping job. Cache results for weeks |
+| HQ geocoding | OpenStreetMap **Nominatim** | ✅ Open; ≤ 1 req/s, real User-Agent | `cli verify`, run by hand |
 | ~~Venue busyness~~ | BestTime / Advan / Dewey | 💲 Paid only | **Not used** (free-data constraint). There is no free, terms-compliant live busyness source. Only `cli demo` uses synthetic busyness |
 | ~~Google Popular Times~~ | — | ❌ No API; scraping Maps violates Google ToS | Deliberately **not** implemented. `populartimes`-style scrapers break often and create legal exposure |
 | ~~Domino's / Papa John's order data~~ | — | ❌ Private, ToS-protected | Not available. We watch the *venue's busyness*, not its orders |
@@ -92,6 +93,7 @@ Until more providers exist, only 3 of the 10 HQs produce live readings.
 |---|---|
 | **1** | Schema, collectors, baseline + POI scoring, event-study code, REST API, dashboard, synthetic demo, tests |
 | **2** | Free-data, local-first mode; daily market + EDGAR ingestion; `cli study` report; demo/real database guards |
-| 3 | Verify HQ coordinates and mark gate lanes on each camera; add TX/MN/PA/RI camera providers; start collecting 24/7 |
+| **3a** | Tooling for the manual checks: `cli verify` (Nominatim geocoding), a gate-lane (ROI) editor with live YOLO preview on the dashboard |
+| 3b | Run those checks locally; add TX/MN/PA/RI camera providers; start collecting 24/7 |
 | 4 | After ~3 months of data: SPY-adjusted returns, Benjamini–Hochberg correction across tickers, predictive dashboard page |
 | 5 | Scale toward the Fortune 500 (CSV import + geocoding, Postgres, queue-based workers) |

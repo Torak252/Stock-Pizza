@@ -45,10 +45,14 @@ cd frontend && npm install && npm run dev               # http://localhost:3000
 cd backend
 cp .env.example .env                  # set SPT_CONTACT_EMAIL; add a free WSDOT code for Seattle
 pip install -e ".[vision]"            # YOLO camera counting (CPU is fine)
+python -m pizza_tracker.cli verify    # geocode each HQ address; review shifts > 500 m on a map
+python -m pizza_tracker.cli verify --apply
 python -m pizza_tracker.cli map       # find OSM venues + nearby Caltrans/WSDOT cameras
+uvicorn pizza_tracker.api.main:app    # dashboard API (separate terminal; keep it on localhost)
 python -m pizza_tracker.cli worker    # leave running: counts every 5 min, scores every 10, market daily
-uvicorn pizza_tracker.api.main:app    # dashboard API (separate terminal)
 ```
+
+**Mark the gate lanes** before trusting any counts. On the dashboard, open Apple, Alphabet or Amazon, click a camera, drag a box over only the lanes leading into the campus, and click **Save box**. **Preview detections** then runs YOLO on a live frame: green boxes are counted, grey are ignored. A camera with no box counts the whole frame, which mostly measures freeway traffic.
 
 The real database (`pizza_tracker.db`) and the demo database are kept apart: `map`, `market` and `worker` refuse to run on demo data, and `demo` refuses to run on real data.
 

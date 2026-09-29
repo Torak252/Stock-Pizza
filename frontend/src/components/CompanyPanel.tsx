@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import RoiEditor from "@/components/RoiEditor";
 import { api, Company, LEVEL_STYLE, Reading, Source } from "@/services/api";
 
 function Sparkline({ readings }: { readings: Reading[] }) {
@@ -28,10 +29,14 @@ function Sparkline({ readings }: { readings: Reading[] }) {
 export default function CompanyPanel({ company }: { company: Company }) {
   const [readings, setReadings] = useState<Reading[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
+  const [editing, setEditing] = useState<Source | null>(null);
+
+  const loadSources = () => api.sources(company.ticker).then(setSources).catch(() => setSources([]));
 
   useEffect(() => {
     api.readings(company.ticker).then(setReadings).catch(() => setReadings([]));
-    api.sources(company.ticker).then(setSources).catch(() => setSources([]));
+    loadSources();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company.ticker]);
 
   const cameras = sources.filter((s) => s.kind === "camera" && s.url);
@@ -58,18 +63,33 @@ export default function CompanyPanel({ company }: { company: Company }) {
       {cameras.length > 0 && (
         <section>
           <h3 className="mb-1 text-sm font-medium text-slate-300">DOT cameras</h3>
+          <p className="mb-2 text-xs text-slate-500">Click a camera to mark the gate lanes to count.</p>
           <div className="grid grid-cols-2 gap-2">
             {cameras.slice(0, 4).map((c) => (
-              <figure key={c.url} className="overflow-hidden rounded border border-slate-800">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={c.url!} alt={c.name} className="aspect-video w-full object-cover" loading="lazy" />
-                <figcaption className="truncate px-1 py-0.5 text-xs text-slate-400">
+              <button key={c.id} onClick={() => setEditing(c)}
+                className="overflow-hidden rounded border border-slate-800 text-left hover:border-orange-400">
+                <span className="relative block">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={c.url!} alt={c.name} className="aspect-video w-full object-cover" loading="lazy" />
+                  <span className={`absolute right-1 top-1 rounded px-1 text-[10px] ${c.roi ? "bg-green-600/80" : "bg-slate-700/80"}`}>
+                    {c.roi ? "lanes set" : "no lanes"}
+                  </span>
+                </span>
+                <span className="block truncate px-1 py-0.5 text-xs text-slate-400">
                   {c.name} · {(c.distance_m / 1000).toFixed(1)} km
-                </figcaption>
-              </figure>
+                </span>
+              </button>
             ))}
           </div>
         </section>
+      )}
+
+      {editing && (
+        <RoiEditor
+          source={editing}
+          onClose={() => setEditing(null)}
+          onSaved={loadSources}
+        />
       )}
 
       <section>
