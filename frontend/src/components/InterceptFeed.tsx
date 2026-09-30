@@ -5,7 +5,7 @@ export default function InterceptFeed({ spikes, onSelect }: { spikes: Spike[]; o
   return (
     <section className="flex h-full min-h-0 flex-col rounded-xl border border-line bg-panel">
       <header className="flex items-center justify-between border-b border-line px-4 py-3">
-        <h2 className="font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-ink-2">Intercepts</h2>
+        <h2 className="panel-title text-[15px]">Intercepts</h2>
         <span className="flex items-center gap-1.5 font-mono text-[10px] text-ink-3">
           <span className="blink inline-block h-1.5 w-1.5 rounded-full bg-fire" /> off-hours spikes
         </span>

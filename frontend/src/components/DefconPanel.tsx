@@ -14,9 +14,9 @@ export default function DefconPanel({ status }: { status: Status | null }) {
   return (
     <section className="relative overflow-hidden rounded-xl border border-line bg-panel p-5">
       <div className="scanlines pointer-events-none absolute inset-0" />
-      <div className="relative flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.2em] text-ink-3">
-        <span>Pizza readiness · last 24 h</span>
-        <span>{status ? `${status.hqs_elevated} of 10 HQs above normal` : "…"}</span>
+      <div className="relative flex items-center justify-between">
+        <span className="panel-title text-[15px]">Pizza readiness</span>
+        <span className="text-[11px] text-ink-3">{status ? `${status.hqs_elevated} of 10 HQs above normal · last 24 h` : "…"}</span>
       </div>
       <div className="relative mt-3 flex items-end gap-4">
         <div className="font-display text-[88px] font-bold leading-[0.8] tracking-tight" style={{ color: cfg.color }}>

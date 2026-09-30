@@ -285,6 +285,8 @@ def live_panel(ticker: str, panel: str, session: Session = Depends(get_session))
         return {"ok": True, "fetched_at": fetched, "data": data}
     except LookupError as exc:  # not configured
         return {"ok": False, "fetched_at": fetched, "setup": True, "error": str(exc).strip("'\"")}
+    except ImportError as exc:  # optional dependency missing
+        return {"ok": False, "fetched_at": fetched, "setup": True, "error": f"pip install {exc.name or 'the missing package'}"}
     except Exception as exc:
         return {"ok": False, "fetched_at": fetched, "error": explain(exc)}
 

@@ -25,6 +25,22 @@ stock_pizza_tracker/
 
 Runs locally on free data only, for research. There is no trading.
 
+## What's on screen
+
+- **Overview** (`/`): DEFCON-style readiness, biggest all-nighters, HQ map, spike feed, watchlist.
+- **HQ page** (`/hq/AAPL`, click any card): a YoshiTracker-style board, each panel live from a free source.
+
+| Panel | Source | Refresh |
+|---|---|---|
+| Time since last 8-K · filings wire · informants (Form 4) · which day they file | SEC EDGAR | 5 min |
+| Price · next earnings progress | Yahoo (yfinance) | 1 min |
+| Traffic cams (auto-refreshing stills, lane editor) | Caltrans / WSDOT / 511PA / `cli add-camera` | 30 s |
+| Pizza near HQ: today vs typical by hour; **short stops** at the gate (YOLO + frame-to-frame tracking) | cameras via the worker | 2 min |
+| Skies over HQ: aircraft radar, private jets on approach | adsb.lol → airplanes.live (ADS-B) | 15 s |
+| Environment: weather, AQI, sunset, moon · traffic vs free-flow | Open-Meteo · TomTom (free key) | 10 min · 2 min |
+
+Run `python -m pizza_tracker.cli doctor` to see which of these work on your machine and what to fix.
+
 ## 1. Try it offline (synthetic data)
 
 ```bash
@@ -43,7 +59,8 @@ cd frontend && npm install && npm run dev               # http://localhost:3000
 
 ```bash
 cd backend
-cp .env.example .env                  # set SPT_CONTACT_EMAIL; free WSDOT code (Seattle) and 511PA key (Conshohocken)
+cp .env.example .env                  # SPT_CONTACT_EMAIL; free keys: WSDOT (Seattle), 511PA (Conshohocken), TomTom (traffic)
+python -m pizza_tracker.cli doctor    # checks every live source and says what to fix
 pip install -e ".[vision]"            # YOLO camera counting (CPU is fine)
 python -m pizza_tracker.cli verify    # geocode each HQ address; review shifts > 500 m on a map
 python -m pizza_tracker.cli verify --apply

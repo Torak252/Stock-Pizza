@@ -30,6 +30,81 @@ export interface Company {
   sources: { cameras: number; venues: number };
 }
 
+export type LivePanel = "weather" | "skies" | "traffic" | "wire" | "quote";
+
+export interface Live<T> {
+  ok: boolean;
+  fetched_at: string;
+  data?: T;
+  error?: string;
+  setup?: boolean; // true = not configured yet (missing key), false = upstream failing
+}
+
+export interface Weather {
+  temp_f: number | null;
+  humidity: number | null;
+  wind_mph: number | null;
+  pressure_hpa: number | null;
+  cloud_pct: number | null;
+  summary: string;
+  sunrise: string | null;
+  sunset: string | null;
+  us_aqi: number | null;
+  moon: { phase: string; illumination_pct: number };
+}
+
+export interface Aircraft {
+  hex: string;
+  callsign: string | null;
+  reg: string | null;
+  type: string | null;
+  kind: "bizjet" | "trainer" | "other";
+  lat: number | null;
+  lon: number | null;
+  alt_ft: number | null;
+  on_ground: boolean;
+  track: number | null;
+  approaching: boolean;
+  dist_km: number | null;
+}
+
+export interface Skies {
+  source: string;
+  radius_nm: number;
+  aircraft: Aircraft[];
+  overhead: number;
+  bizjets: number;
+  bizjets_approaching: number;
+  bizjets_on_ground: number;
+}
+
+export interface Traffic {
+  current_speed_mph: number | null;
+  free_flow_speed_mph: number | null;
+  vs_free_flow_pct: number | null;
+  closed: boolean;
+}
+
+export interface Wire {
+  wire: { form: string; ts: string; url: string | null }[];
+  last_8k: string | null;
+  insider_filings_7d: number;
+  eightk_by_weekday: Record<string, number>;
+  eightk_sample: number;
+}
+
+export interface Quote {
+  last: number | null;
+  change_pct: number | null;
+  earnings: { next: string | null; last: string | null } | null;
+}
+
+export interface Hourly {
+  metric: string | null;
+  now_hour?: number;
+  hours: { hour: number; today: number | null; typical: number | null }[];
+}
+
 export interface Status {
   mode: "demo" | "live";
   defcon: 1 | 2 | 3 | 4 | 5;
@@ -75,6 +150,9 @@ async function get<T>(path: string): Promise<T> {
 export const api = {
   companies: () => get<Company[]>("/companies"),
   status: () => get<Status>("/status"),
+  company: async (ticker: string) => (await get<Company[]>("/companies")).find((c) => c.ticker === ticker.toUpperCase()) ?? null,
+  live: <T,>(ticker: string, panel: LivePanel) => get<Live<T>>(`/companies/${ticker}/live/${panel}`),
+  hourly: (ticker: string) => get<Hourly>(`/companies/${ticker}/hourly`),
   spikes: (limit = 50) => get<Spike[]>(`/spikes?limit=${limit}`),
   readings: (ticker: string, hours = 168) => get<Reading[]>(`/companies/${ticker}/readings?hours=${hours}`),
   sources: (ticker: string) => get<Source[]>(`/companies/${ticker}/sources`),
@@ -119,6 +197,8 @@ export const LEVEL: Record<Level, { label: string; icon: string; color: string }
 };
 
 export const METRIC_LABEL: Record<string, string> = {
+  short_stops: "short stops at the gate",
+  bizjet_count: "private jets nearby",
   venue_busyness: "pizza place busyness",
   vehicle_count: "cars at the gate",
   delivery_vehicle_count: "delivery vehicles",
@@ -126,6 +206,8 @@ export const METRIC_LABEL: Record<string, string> = {
 };
 
 export const METRIC_SHORT: Record<string, string> = {
+  short_stops: "gate stops",
+  bizjet_count: "private jets",
   venue_busyness: "pizza place",
   vehicle_count: "gate traffic",
   delivery_vehicle_count: "deliveries",
