@@ -170,3 +170,16 @@ def test_pa511_map_inventory():
     cams = PA511MapProvider(client=object()).parse_inventory(rows)
     assert len(cams) == 1 and cams[0].image_url == "https://www.511pa.com/map/Cctv/5775"
     assert (cams[0].lat, cams[0].lon) == (40.06895, -75.31126)
+
+
+def test_env_example_parses_to_blank_keys(tmp_path, monkeypatch):
+    """Guards the .env.example format: a blank value followed by '# comment' would become the value."""
+    from pathlib import Path
+
+    from pizza_tracker.config import Settings
+
+    for k in ("SPT_WSDOT_ACCESS_CODE", "SPT_PA511_API_KEY", "SPT_TOMTOM_API_KEY", "SPT_CONTACT_EMAIL"):
+        monkeypatch.delenv(k, raising=False)
+    example = Path(__file__).parents[1] / ".env.example"
+    s = Settings(_env_file=example)
+    assert (s.wsdot_access_code, s.pa511_api_key, s.tomtom_api_key, s.contact_email) == ("", "", "", "")

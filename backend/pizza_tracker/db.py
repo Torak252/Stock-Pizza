@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from .config import get_settings
@@ -10,8 +10,19 @@ class Base(DeclarativeBase):
 
 def make_engine(url: str | None = None):
     url = url or get_settings().database_url
-    kwargs = {"connect_args": {"check_same_thread": False}} if url.startswith("sqlite") else {"pool_pre_ping": True}
-    return create_engine(url, **kwargs)
+    if not url.startswith("sqlite"):
+        return create_engine(url, pool_pre_ping=True)
+    engine = create_engine(url, connect_args={"check_same_thread": False, "timeout": 30})
+
+    @event.listens_for(engine, "connect")
+    def _sqlite_wal(dbapi_conn, _):
+        # WAL lets the API read while the worker writes (no "database is locked" under 24/7 use).
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA synchronous=NORMAL")
+        cur.close()
+
+    return engine
 
 
 engine = make_engine()

@@ -115,8 +115,16 @@ def status(session: Session = Depends(get_session)) -> dict:
     since = datetime.now(timezone.utc) - timedelta(hours=24)
     peaks = _last_night_peaks(session, since)
     demo = session.scalar(select(SignalSource.id).where(SignalSource.provider == "synthetic").limit(1)) is not None
+    last_sample = session.scalar(select(func.max(ActivitySample.ts)))
+    first_sample = session.scalar(select(func.min(ActivitySample.ts)))
+    readings_24h = session.scalar(select(func.count(IndexReading.id)).where(IndexReading.ts >= since)) or 0
     return {
+        "first_sample_at": _iso_utc(first_sample) if first_sample else None,
+        # No readings yet = the baseline is still filling (needs ~4 days); the UI says "calibrating", not "quiet".
+        "calibrating": readings_24h == 0,
         "mode": "demo" if demo else "live",
+        # When the worker last recorded anything; the dashboard flags a stalled collector.
+        "last_sample_at": _iso_utc(last_sample) if last_sample else None,
         "defcon": defcon_for([r.level for r in peaks.values()]),
         "hqs_elevated": sum(r.level != "normal" for r in peaks.values()),
         "generated_at": datetime.now(timezone.utc).isoformat(),

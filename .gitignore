@@ -8,3 +8,6 @@ next-env.d.ts
 __pycache__/
 .venv/
 .pytest_cache/
+*.db-shm
+*.db-wal
+*.egg-info/

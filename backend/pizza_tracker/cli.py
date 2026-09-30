@@ -61,14 +61,27 @@ def run_worker() -> None:
         run.__name__ = fn.__name__
         return run
 
+    with SessionLocal() as s:
+        if not s.scalar(select(SignalSource.id).where(SignalSource.kind == "camera").limit(1)):
+            log.info("no cameras yet: mapping cameras near each HQ (one-off, ~1 min)")
+            log.info("cameras mapped: %s", pipeline.map_cameras(s))
+
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
     sched = BlockingScheduler(timezone="UTC")
+
+    def every(fn, minutes: int, first_in_s: int = 0):
+        sched.add_job(job(fn), "interval", minutes=minutes, max_instances=1, coalesce=True,
+                      name=fn.__name__, next_run_time=now + timedelta(seconds=first_in_s))
+
     # Cameras every 2 min: most DOT stills refresh every 1-5 min, and short stops need consecutive frames.
-    sched.add_job(job(pipeline.collect_camera_counts), "interval", minutes=2, max_instances=1)
-    sched.add_job(job(pipeline.collect_skies), "interval", minutes=2, max_instances=1)
-    sched.add_job(job(pipeline.score_all), "interval", minutes=5, max_instances=1)
-    # Refresh market data once a day, after US close (22:30 UTC), and once at startup.
-    sched.add_job(job(pipeline.ingest_market), "cron", hour=22, minute=30)
-    sched.add_job(job(pipeline.ingest_market))
+    every(pipeline.collect_camera_counts, 2)
+    every(pipeline.collect_skies, 2, first_in_s=20)
+    every(pipeline.score_all, 5, first_in_s=240)
+    # Market data once a day after the US close (22:30 UTC), plus once at startup.
+    sched.add_job(job(pipeline.ingest_market), "cron", hour=22, minute=30, name="ingest_market")
+    sched.add_job(job(pipeline.ingest_market), name="ingest_market (startup)", next_run_time=now + timedelta(seconds=60))
     sched.start()
 
 

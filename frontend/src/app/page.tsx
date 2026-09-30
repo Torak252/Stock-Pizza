@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import CollectorChip from "@/components/CollectorChip";
 import CompanyCard from "@/components/CompanyCard";
 import DefconPanel from "@/components/DefconPanel";
 import InterceptFeed from "@/components/InterceptFeed";
@@ -63,6 +64,7 @@ export default function Dashboard() {
               Demo data · synthetic
             </span>
           )}
+          <CollectorChip status={status} now={now} />
           <span className="flex items-center gap-1.5 rounded border border-line px-2 py-1 text-ink-2">
             <span className="blink inline-block h-1.5 w-1.5 rounded-full bg-quiet" />
             {now ? now.toISOString().slice(11, 19) : "--:--:--"} UTC
@@ -93,7 +95,11 @@ export default function Dashboard() {
               </button>
             ))}
             {!leaders.length && (
-              <p className="col-span-3 py-6 text-sm text-ink-2">Nobody stayed late in the last 24 hours. Suspiciously normal.</p>
+              <p className="col-span-3 py-6 text-sm text-ink-2">
+                {status?.calibrating
+                  ? "Still learning each campus's normal. All-nighters show up here once there's enough history."
+                  : "Nobody stayed late in the last 24 hours. Suspiciously normal."}
+              </p>
             )}
           </div>
         </section>

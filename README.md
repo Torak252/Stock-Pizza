@@ -41,6 +41,20 @@ Runs locally on free data only, for research. There is no trading.
 
 Run `python -m pizza_tracker.cli doctor` to see which of these work on your machine and what to fix.
 
+## Run it (real data, 24/7)
+
+```bash
+cp backend/.env.example backend/.env   # set SPT_CONTACT_EMAIL (SEC requires it); other keys optional
+./start.sh                               # macOS/Linux; first run installs everything (~5 min)
+```
+
+Open http://localhost:3000. On first start the collector finds the cameras near each HQ, then samples cameras,
+aircraft and filings every few minutes. The header chip shows whether it is live or stalled. Leave it
+running: the index needs ~4 days of history to start judging "normal" and gets sharper after ~4 weeks.
+Bandwidth is about 0.5 GB/day (video streams are read with byte-range requests, not downloaded whole).
+
+Docker alternative (untested here; no Docker daemon in the dev sandbox): `docker compose up --build`.
+
 ## 1. Try it offline (synthetic data)
 
 ```bash

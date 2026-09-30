@@ -263,31 +263,60 @@ def _load_company_frame(session: Session, company: Company, since: datetime) -> 
     return add_local_calendar(df, company.timezone)
 
 
+# Baselines from most to least specific. The index is usable once the loosest level has
+# `min_baseline_samples` hours of history (~4 days) and sharpens to weekday-specific after ~4 weeks.
+BASELINE_LEVELS = ("weekday+hour", "daytype+hour", "hour")
+
+
+def _level_mask(df: pd.DataFrame, level: str, weekday: int) -> pd.Series:
+    if level == "weekday+hour":
+        return df["dow"] == weekday
+    if level == "daytype+hour":
+        return (df["dow"] >= 5) == (weekday >= 5)  # weekday vs weekend
+    return pd.Series(True, index=df.index)
+
+
 def _score_frame(df: pd.DataFrame, company: Company, now: datetime) -> IndexReading | None:
-    """Score the current local clock hour (so far) against the same hour in past weeks."""
+    """Score the current local clock hour (so far) against the same hour in the past.
+
+    Each metric uses the most specific baseline that has enough history: same weekday, then
+    same day type (weekday/weekend), then the same hour on any day.
+    """
     s = get_settings()
     if df.empty:
         return None
     now_ts = pd.Timestamp(now)
     cutoff = now_ts.floor("h")
     local = now.astimezone(ZoneInfo(company.timezone))
-    # Only the same local (weekday, hour) slot informs the baseline, and only the part of that
-    # hour that has elapsed so far, so a partial hour is never compared with a full one.
+    # Only the same local hour, and only the part of it that has elapsed so far, so a partial
+    # hour is never compared with a full one.
     history = df[(df["ts"] < cutoff) & (df["ts"] >= now_ts - pd.Timedelta(weeks=s.baseline_weeks))
-                 & (df["dow"] == local.weekday()) & (df["hour"] == local.hour) & (df["minute"] <= local.minute)]
+                 & (df["hour"] == local.hour) & (df["minute"] <= local.minute)]
     current = df[(df["ts"] >= cutoff) & (df["ts"] <= now_ts)]
     if current.empty or history.empty:
         return None
 
-    # Aggregate history to one value per metric per hour so dense sources don't dominate the baseline.
-    hourly = (history.assign(bucket=history["ts"].dt.floor("h"))
-              .groupby(["metric", "bucket", "dow", "hour"], as_index=False)["value"].mean())
-    baseline = build_baseline(hourly, min_samples=s.min_baseline_samples)
-    latest = current.groupby("metric", as_index=False).agg(value=("value", "mean"))
-    latest = latest.assign(dow=local.weekday(), hour=local.hour)
-    scored = robust_z(latest, baseline).set_index("metric")
-    z = scored["z"].to_dict()
-    pcts = [pct_of_normal(m, row["value"], row["median"]) for m, row in scored.dropna(subset=["median"]).iterrows()]
+    latest = current.groupby("metric", as_index=False).agg(value=("value", "mean")).assign(dow=0, hour=local.hour)
+    chosen: dict[str, pd.Series] = {}
+    for level in BASELINE_LEVELS:
+        pending = [m for m in latest["metric"] if m not in chosen]
+        if not pending:
+            break
+        subset = history[_level_mask(history, level, local.weekday()) & history["metric"].isin(pending)]
+        if subset.empty:
+            continue
+        # One value per metric per hour so dense sources don't dominate; dow collapsed for this level.
+        hourly = (subset.assign(bucket=subset["ts"].dt.floor("h"), dow=0)
+                  .groupby(["metric", "bucket", "dow", "hour"], as_index=False)["value"].mean())
+        baseline = build_baseline(hourly, min_samples=s.min_baseline_samples)
+        for m, row in robust_z(latest[latest["metric"].isin(pending)], baseline).set_index("metric").iterrows():
+            if pd.notna(row["z"]):
+                chosen[m] = row
+    if not chosen:
+        return None
+
+    z = {m: row["z"] for m, row in chosen.items()}
+    pcts = [pct_of_normal(m, row["value"], row["median"]) for m, row in chosen.items()]
     pct_normal = round(sum(pcts) / len(pcts), 1) if pcts else None
 
     reading = score_snapshot(z, local.hour, s.z_threshold, s.off_hours_start, s.off_hours_end)

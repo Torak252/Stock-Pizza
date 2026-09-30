@@ -107,6 +107,9 @@ export interface Hourly {
 
 export interface Status {
   mode: "demo" | "live";
+  last_sample_at: string | null;
+  first_sample_at: string | null;
+  calibrating: boolean;
   defcon: 1 | 2 | 3 | 4 | 5;
   hqs_elevated: number;
   generated_at: string;
@@ -207,7 +210,7 @@ export const METRIC_LABEL: Record<string, string> = {
   short_stops: "short stops at the gate",
   bizjet_count: "private jets nearby",
   venue_busyness: "pizza place busyness",
-  vehicle_count: "cars at the gate",
+  vehicle_count: "vehicles on nearby roads",
   delivery_vehicle_count: "delivery vehicles",
   parking_occupancy: "parking lot",
 };
@@ -216,7 +219,7 @@ export const METRIC_SHORT: Record<string, string> = {
   short_stops: "gate stops",
   bizjet_count: "private jets",
   venue_busyness: "pizza place",
-  vehicle_count: "gate traffic",
+  vehicle_count: "road traffic",
   delivery_vehicle_count: "deliveries",
   parking_occupancy: "parking",
 };

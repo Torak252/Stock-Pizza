@@ -383,12 +383,13 @@ def fetch_snapshot(image_url: str, client: PoliteClient | None = None) -> bytes:
     return client.get(image_url).content
 
 
-def fetch_stream_frames(playlist_url: str, count: int = 3, client: PoliteClient | None = None) -> list:
-    """Decode `count` evenly spaced frames from the newest complete segment of an HLS stream.
+def fetch_stream_frames(playlist_url: str, count: int = 1, client: PoliteClient | None = None) -> list:
+    """Decode frames from the start of the newest complete segment of an HLS stream.
 
-    Caltrans streams are 1280x720 (4x the stills), which is what lets YOLO see distant cars.
-    The newest segment can still be empty while it's being written, so we take the newest
-    one that has bytes. Requires PyAV (`pip install av`, part of the vision extra).
+    Caltrans/SDOT/MnDOT streams are 720p-1080p (vs 320x260 stills), which is what lets YOLO see
+    distant cars. Segments are 0.6-5 MB, but the first keyframe sits at the start, so we fetch
+    progressively larger byte ranges (96 KB is usually enough) instead of whole segments; that
+    keeps a 24/7 worker to roughly 0.5 GB/day instead of ~25 GB. Requires PyAV (vision extra).
     """
     import io
     from urllib.parse import urljoin
@@ -400,6 +401,12 @@ def fetch_stream_frames(playlist_url: str, count: int = 3, client: PoliteClient 
     def media_lines(text: str) -> list[str]:
         return [ln for ln in text.splitlines() if ln and not ln.startswith("#")]
 
+    def decode(data: bytes) -> list:
+        try:
+            return [f.to_ndarray(format="bgr24") for f in av.open(io.BytesIO(data)).decode(video=0)]
+        except Exception:  # a truncated range can end mid-packet; whatever decoded before that is kept
+            return []
+
     master = client.get(playlist_url)
     lines = media_lines(master.text)
     if not lines:
@@ -407,12 +414,17 @@ def fetch_stream_frames(playlist_url: str, count: int = 3, client: PoliteClient 
     chunklist = master
     if lines[-1].endswith(".m3u8"):  # master playlist -> variant chunklist
         chunklist = client.get(urljoin(str(master.url), lines[-1]))
-    for seg in reversed(media_lines(chunklist.text)):
-        data = client.get(urljoin(str(chunklist.url), seg)).content
-        if not data:
-            continue
-        frames = [f.to_ndarray(format="bgr24") for f in av.open(io.BytesIO(data)).decode(video=0)]
-        if frames:
-            step = max(1, len(frames) // count)
-            return frames[::step][:count]
+    segments = media_lines(chunklist.text)
+    # The newest segment may still be being written; start from the one before it.
+    for seg in (segments[-2:-1] + segments[-1:] + segments[:-2][::-1]) if len(segments) > 1 else segments:
+        url = urljoin(str(chunklist.url), seg)
+        for size in (96 * 1024, 512 * 1024, None):
+            headers = {"Range": f"bytes=0-{size - 1}"} if size else {}
+            data = client._client.get(url, headers=headers).content  # bypass the response cache: ranges differ
+            frames = decode(data) if data else []
+            if frames:
+                step = max(1, len(frames) // count)
+                return frames[::step][:count]
+            if not data or (size and len(data) < size):
+                break  # server returned the whole (empty or short) segment already
     raise ValueError("no decodable segment in HLS stream")

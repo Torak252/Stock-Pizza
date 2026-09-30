@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import CollectorChip from "@/components/CollectorChip";
 import CamsPanel from "@/components/hq/CamsPanel";
 import EnvironmentPanel from "@/components/hq/EnvironmentPanel";
 import FilingDaysPanel from "@/components/hq/FilingDaysPanel";
@@ -65,7 +66,7 @@ export default function HqPage() {
           <p className="text-[13px] text-ink-2">Is {company?.name ?? ticker} working late tonight? Everything here is live public data.</p>
         </div>
         <div className="flex items-center gap-2 text-[11px] text-ink-2">
-          {status?.mode === "demo" && <span className="rounded-full border border-warm/50 px-2 py-0.5 text-warm">Index: demo data</span>}
+          <CollectorChip status={status} now={now} />
           <span className="rounded-full border border-line-2 px-2 py-0.5">{company?.hq_address ?? "…"}</span>
           <span className="flex items-center gap-1.5"><span className="blink inline-block h-1.5 w-1.5 rounded-full bg-quiet" />Updated {now && updated ? ago(updated, t) : "…"}</span>
         </div>

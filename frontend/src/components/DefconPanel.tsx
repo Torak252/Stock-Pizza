@@ -8,7 +8,34 @@ const LEVELS = {
   1: { color: "#ffffff", line: "Nobody is going home tonight." },
 } as const;
 
+const WARMUP_HOURS = 96; // hour-of-day baselines need ~4 samples per hour: about four days
+
+function Calibrating({ status }: { status: Status }) {
+  const hours = status.first_sample_at ? (Date.now() - new Date(status.first_sample_at).getTime()) / 3.6e6 : 0;
+  const pct = Math.min(100, Math.round((100 * hours) / WARMUP_HOURS));
+  return (
+    <section className="relative overflow-hidden rounded-xl border border-line bg-panel p-5">
+      <div className="flex items-center justify-between">
+        <span className="panel-title text-[15px]">Pizza readiness</span>
+        <span className="text-[11px] text-ink-3">calibrating</span>
+      </div>
+      <div className="mt-3 font-display text-4xl font-bold text-cheese">Learning what normal looks like</div>
+      <p className="mt-2 max-w-md text-sm text-ink-2">
+        {status.first_sample_at
+          ? `Collecting for ${hours < 1 ? `${Math.max(1, Math.round(hours * 60))} min` : hours < 24 ? `${Math.round(hours)} h` : `${(hours / 24).toFixed(1)} days`}. `
+          : "No samples yet: start the collector (cli worker). "}
+        It needs about four days of history before it can call a night unusual, and gets sharper after four weeks.
+      </p>
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-line" role="img" aria-label={`${pct}% of warm-up collected`}>
+        <div className="h-full rounded-full bg-cheese" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="mt-1 text-[10px] text-ink-3">{pct}% of the 4-day warm-up</div>
+    </section>
+  );
+}
+
 export default function DefconPanel({ status }: { status: Status | null }) {
+  if (status?.mode === "live" && status.calibrating) return <Calibrating status={status} />;
   const level = status?.defcon ?? 5;
   const cfg = LEVELS[level];
   return (

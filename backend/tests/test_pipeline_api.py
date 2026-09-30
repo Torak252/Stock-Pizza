@@ -99,7 +99,7 @@ def test_overview_fields_and_status(client):
     assert all(r["latest"]["pct_normal"] is not None for r in rows)
     assert all(r["sources"]["venues"] == 1 for r in rows)
     st = client.get("/status").json()
-    assert st["mode"] == "demo" and 1 <= st["defcon"] <= 5
+    assert st["mode"] == "demo" and 1 <= st["defcon"] <= 5 and st["last_sample_at"]
     assert defcon_for([]) == 5 and defcon_for(["normal", "elevated"]) == 4
     assert defcon_for(["high"]) == 3 and defcon_for(["extreme"]) == 2 and defcon_for(["extreme"] * 3) == 1
 
@@ -135,3 +135,27 @@ def test_hourly_profile(client):
     h = client.get("/companies/AMZN/hourly").json()
     assert h["metric"] == "venue_busyness" and len(h["hours"]) == 24
     assert any(x["typical"] is not None for x in h["hours"])
+
+
+def test_baseline_falls_back_so_index_warms_up_in_days(tmp_path):
+    """Five days of hourly history: too little for a same-weekday baseline, enough for same-hour."""
+    from datetime import datetime, timedelta, timezone
+
+    from pizza_tracker.models import ActivitySample, Company
+
+    engine = db.make_engine(f"sqlite:///{tmp_path / 'w.db'}")
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    db.init_db(engine)
+    with Session() as s:
+        seed_companies(s)
+        amzn = s.query(Company).filter_by(ticker="AMZN").one()
+        now = datetime(2026, 10, 2, 6, 30, tzinfo=timezone.utc)  # Thu 11:30 PM PDT
+        t = now - timedelta(days=5)
+        while t < now - timedelta(hours=1):
+            s.add(ActivitySample(ts=t, company_id=amzn.id, metric="vehicle_count", value=10))
+            t += timedelta(hours=1)
+        s.add(ActivitySample(ts=now - timedelta(minutes=5), company_id=amzn.id, metric="vehicle_count", value=40))
+        s.commit()
+        reading = pipeline.score_company(s, amzn, now)
+        assert reading is not None and reading.off_hours
+        assert reading.level == "extreme" and reading.pct_normal > 200

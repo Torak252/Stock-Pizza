@@ -1,41 +1,26 @@
-# Optional. The default way to run is locally without Docker (see README).
+# Optional alternative to ./start.sh. API and worker share one SQLite file on a volume.
 services:
-  db:
-    image: timescale/timescaledb:latest-pg16
-    environment:
-      POSTGRES_USER: pizza
-      POSTGRES_PASSWORD: pizza
-      POSTGRES_DB: pizza
-    ports: ["5432:5432"]
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./infra/timescale_init.sql:/docker-entrypoint-initdb.d/00_init.sql:ro
-      - ./infra/hypertables.sql:/docker-entrypoint-initdb.d/hypertables.sql.manual:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pizza"]
-      interval: 5s
-      retries: 10
-
   api:
     build: ./backend
     env_file: { path: ./backend/.env, required: false }
-    environment: &pg { SPT_DATABASE_URL: "postgresql+psycopg://pizza:pizza@db:5432/pizza" }
-    ports: ["8000:8000"]
-    depends_on: { db: { condition: service_healthy } }
+    environment: &db { SPT_DATABASE_URL: "sqlite:////data/pizza_tracker.db" }
+    volumes: [data:/data]
+    ports: ["127.0.0.1:8000:8000"]
 
   worker:
     build: ./backend
     env_file: { path: ./backend/.env, required: false }
-    environment: *pg
+    environment: *db
+    volumes: [data:/data]
     command: ["python", "-m", "pizza_tracker.cli", "worker"]
-    depends_on: { db: { condition: service_healthy } }
+    restart: unless-stopped
 
   web:
     build:
       context: ./frontend
       args: { NEXT_PUBLIC_API_URL: "http://localhost:8000" }
-    ports: ["3000:3000"]
+    ports: ["127.0.0.1:3000:3000"]
     depends_on: [api]
 
 volumes:
-  pgdata:
+  data:
