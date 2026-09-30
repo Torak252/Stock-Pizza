@@ -103,9 +103,11 @@ def test_disabled_cameras_are_skipped(Session, monkeypatch):
 
     from pizza_tracker.collectors import cameras
     from pizza_tracker.models import ActivitySample
-    from pizza_tracker.vision.detector import FrameCounts
 
-    fake_detector = types.SimpleNamespace(count_vehicles=lambda img, roi=None: FrameCounts(4, 1, {"car": 3, "truck": 1}))
+    from pizza_tracker.vision.detector import counts_from
+
+    boxes = [((0.1, 0.1, 0.2, 0.2), "car"), ((0.5, 0.5, 0.6, 0.6), "truck")]
+    fake_detector = types.SimpleNamespace(detect_boxes=lambda img, roi=None: boxes, counts_from=counts_from)
     monkeypatch.setitem(sys.modules, "pizza_tracker.vision.detector", fake_detector)
     monkeypatch.setattr(cameras, "fetch_snapshot", lambda url: b"jpeg")
     with Session() as s:

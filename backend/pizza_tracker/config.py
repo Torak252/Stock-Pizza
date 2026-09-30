@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # Free upstream credentials (optional; collectors that lack one are skipped).
     wsdot_access_code: str = ""      # free: https://wsdot.wa.gov/traffic/api/
     pa511_api_key: str = ""          # free developer key: https://www.511pa.com/developers
+    tomtom_api_key: str = ""         # free tier: https://developer.tomtom.com (traffic vs free-flow)
 
     # Politeness defaults applied by the shared HTTP client.
     default_min_interval_s: float = 2.0   # per-host minimum spacing between requests

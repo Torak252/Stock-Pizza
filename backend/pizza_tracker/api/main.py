@@ -246,3 +246,77 @@ def preview(source_id: int, session: Session = Depends(get_session)) -> Response
         "X-Delivery-Count": str(counts.delivery_vehicle_count),
         "Access-Control-Expose-Headers": "X-Vehicle-Count, X-Delivery-Count",
     })
+
+
+# ---------------------------------------------------------------- live panels (per-HQ page)
+LIVE_PANELS = ("weather", "skies", "traffic", "wire", "quote")
+
+
+@app.get("/companies/{ticker}/live/{panel}")
+def live_panel(ticker: str, panel: str, session: Session = Depends(get_session)) -> dict:
+    """Near-real-time panel data. Upstream failures come back as ok=false with a readable reason."""
+    from ..doctor import explain
+
+    if panel not in LIVE_PANELS:
+        raise HTTPException(404, f"unknown panel {panel}; one of {', '.join(LIVE_PANELS)}")
+    c = _company_or_404(session, ticker)
+    fetched = datetime.now(timezone.utc).isoformat()
+    try:
+        if panel == "weather":
+            from ..live.weather import fetch_weather, moon
+
+            data = {**fetch_weather(c.lat, c.lon), "moon": moon()}
+        elif panel == "skies":
+            from ..live.skies import fetch_skies
+
+            data = fetch_skies(c.lat, c.lon)
+        elif panel == "traffic":
+            from ..live.traffic import fetch_traffic
+
+            data = fetch_traffic(c.lat, c.lon)
+        elif panel == "wire":
+            from ..live.filings import fetch_wire
+
+            data = fetch_wire(c.ticker)
+        else:
+            from ..live.quote import fetch_quote
+
+            data = fetch_quote(c.ticker)
+        return {"ok": True, "fetched_at": fetched, "data": data}
+    except LookupError as exc:  # not configured
+        return {"ok": False, "fetched_at": fetched, "setup": True, "error": str(exc).strip("'\"")}
+    except Exception as exc:
+        return {"ok": False, "fetched_at": fetched, "error": explain(exc)}
+
+
+HOURLY_METRICS = ("short_stops", "delivery_vehicle_count", "vehicle_count", "venue_busyness")
+
+
+@app.get("/companies/{ticker}/hourly")
+def hourly(ticker: str, metric: str | None = None, session: Session = Depends(get_session)) -> dict:
+    """Today's activity by local hour next to the typical level for this weekday and hour."""
+    import pandas as pd
+    from zoneinfo import ZoneInfo
+
+    c = _company_or_404(session, ticker)
+    since = datetime.now(timezone.utc) - timedelta(weeks=8)
+    have = set(session.scalars(select(ActivitySample.metric).where(
+        ActivitySample.company_id == c.id, ActivitySample.ts >= since).distinct()))
+    metric = metric or next((m for m in HOURLY_METRICS if m in have), None)
+    if metric is None:
+        return {"metric": None, "hours": []}
+    rows = session.execute(select(ActivitySample.ts, ActivitySample.value).where(
+        ActivitySample.company_id == c.id, ActivitySample.metric == metric, ActivitySample.ts >= since)).all()
+    df = pd.DataFrame(rows, columns=["ts", "value"])
+    local = pd.to_datetime(df["ts"], utc=True).dt.tz_convert(c.timezone)
+    df = df.assign(date=local.dt.date, dow=local.dt.dayofweek, hour=local.dt.hour)
+    today = datetime.now(ZoneInfo(c.timezone))
+    cur = df[df["date"] == today.date()].groupby("hour")["value"].mean()
+    past = df[(df["date"] != today.date()) & (df["dow"] == today.weekday())]
+    typical = past.groupby(["date", "hour"])["value"].mean().groupby("hour").median()
+    return {
+        "metric": metric,
+        "now_hour": today.hour,
+        "hours": [{"hour": h, "today": None if h not in cur else round(float(cur[h]), 2),
+                   "typical": None if h not in typical else round(float(typical[h]), 2)} for h in range(24)],
+    }

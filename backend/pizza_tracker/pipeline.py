@@ -126,9 +126,14 @@ def verify_hqs(session: Session, apply: bool = False, geocoder=None) -> list[dic
 
 
 # ---------------------------------------------------------------- collection (every ~5 min)
+# Short-stop trackers live as long as the worker process; a restart just forgets in-flight stops.
+_stop_trackers: dict[int, "StopTracker"] = {}
+
+
 def collect_camera_counts(session: Session, now: datetime | None = None) -> int:
     from .collectors.cameras import fetch_snapshot
-    from .vision.detector import count_vehicles
+    from .vision.detector import counts_from, detect_boxes
+    from .vision.stops import StopTracker
 
     now = now or datetime.now(timezone.utc)
     n = 0
@@ -136,12 +141,34 @@ def collect_camera_counts(session: Session, now: datetime | None = None) -> int:
         if (src.meta or {}).get("disabled"):
             continue
         try:
-            counts = count_vehicles(fetch_snapshot(src.url), roi=(src.meta or {}).get("roi"))
+            detections = detect_boxes(fetch_snapshot(src.url), roi=(src.meta or {}).get("roi"))
         except Exception as exc:
             log.warning("camera %s failed: %s", src.external_id, exc)
             continue
-        for metric in ("vehicle_count", "delivery_vehicle_count"):
-            session.add(ActivitySample(ts=now, company_id=src.company_id, source_id=src.id, metric=metric, value=getattr(counts, metric)))
+        counts = counts_from(detections)
+        stops = _stop_trackers.setdefault(src.id, StopTracker()).update(detections, now.timestamp())
+        for metric, value in (("vehicle_count", counts.vehicle_count),
+                              ("delivery_vehicle_count", counts.delivery_vehicle_count),
+                              ("short_stops", stops)):
+            session.add(ActivitySample(ts=now, company_id=src.company_id, source_id=src.id, metric=metric, value=value))
+        n += 1
+    session.commit()
+    return n
+
+
+def collect_skies(session: Session, now: datetime | None = None, radius_nm: int = 25) -> int:
+    """Business jets near each HQ (ADS-B), recorded so they feed the index like any other signal."""
+    from .live.skies import fetch_skies
+
+    now = now or datetime.now(timezone.utc)
+    n = 0
+    for company in session.scalars(select(Company)):
+        try:
+            sky = fetch_skies(company.lat, company.lon, radius_nm)
+        except Exception as exc:
+            log.warning("skies failed for %s: %s", company.ticker, exc)
+            continue
+        session.add(ActivitySample(ts=now, company_id=company.id, metric="bizjet_count", value=sky["bizjets"]))
         n += 1
     session.commit()
     return n

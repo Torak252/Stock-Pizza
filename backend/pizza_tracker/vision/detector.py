@@ -60,15 +60,23 @@ def _counts(by_class: dict[str, int]) -> FrameCounts:
     )
 
 
-def count_vehicles(image_bytes: bytes, conf: float = 0.35, roi: Roi | None = None) -> FrameCounts:
-    """roi = (x1, y1, x2, y2) as fractions of the frame, e.g. just the lanes into the campus gate."""
+def detect_boxes(image_bytes: bytes, conf: float = 0.35, roi: Roi | None = None) -> list[tuple[tuple[float, float, float, float], str]]:
+    """Vehicles inside the ROI as (normalized box, class name)."""
     frame, boxes = _detect(image_bytes, conf)
     h, w = frame.shape[:2]
+    return [((b[0] / w, b[1] / h, b[2] / w, b[3] / h), name) for b, name in boxes if _in_roi(b, w, h, roi)]
+
+
+def counts_from(detections: list[tuple[tuple[float, float, float, float], str]]) -> FrameCounts:
     by_class: dict[str, int] = {}
-    for box, name in boxes:
-        if _in_roi(box, w, h, roi):
-            by_class[name] = by_class.get(name, 0) + 1
+    for _, name in detections:
+        by_class[name] = by_class.get(name, 0) + 1
     return _counts(by_class)
+
+
+def count_vehicles(image_bytes: bytes, conf: float = 0.35, roi: Roi | None = None) -> FrameCounts:
+    """roi = (x1, y1, x2, y2) as fractions of the frame, e.g. just the lanes into the campus gate."""
+    return counts_from(detect_boxes(image_bytes, conf, roi))
 
 
 def annotate(image_bytes: bytes, conf: float = 0.35, roi: Roi | None = None) -> tuple[bytes, FrameCounts]:

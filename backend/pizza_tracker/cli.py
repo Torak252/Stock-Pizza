@@ -62,8 +62,10 @@ def run_worker() -> None:
         return run
 
     sched = BlockingScheduler(timezone="UTC")
-    sched.add_job(job(pipeline.collect_camera_counts), "interval", minutes=5, max_instances=1)
-    sched.add_job(job(pipeline.score_all), "interval", minutes=10, max_instances=1)
+    # Cameras every 2 min: most DOT stills refresh every 1-5 min, and short stops need consecutive frames.
+    sched.add_job(job(pipeline.collect_camera_counts), "interval", minutes=2, max_instances=1)
+    sched.add_job(job(pipeline.collect_skies), "interval", minutes=2, max_instances=1)
+    sched.add_job(job(pipeline.score_all), "interval", minutes=5, max_instances=1)
     # Refresh market data once a day, after US close (22:30 UTC), and once at startup.
     sched.add_job(job(pipeline.ingest_market), "cron", hour=22, minute=30)
     sched.add_job(job(pipeline.ingest_market))

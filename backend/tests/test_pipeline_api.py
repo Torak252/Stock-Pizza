@@ -113,3 +113,25 @@ def test_init_db_adds_missing_columns(tmp_path):
                           "score FLOAT, components JSON, level VARCHAR(16), off_hours BOOLEAN)"))
     db.init_db(engine)
     assert "pct_normal" in {c["name"] for c in inspect(engine).get_columns("index_readings")}
+
+
+def test_live_panel_errors_are_readable(client, monkeypatch):
+    import httpx
+
+    from pizza_tracker.live import weather
+
+    def blocked(lat, lon):
+        raise httpx.ConnectError("no", request=httpx.Request("GET", "https://api.open-meteo.com/v1/forecast"))
+
+    monkeypatch.setattr(weather, "fetch_weather", blocked)
+    r = client.get("/companies/AAPL/live/weather").json()
+    assert r["ok"] is False and "api.open-meteo.com" in r["error"]
+    traffic = client.get("/companies/AAPL/live/traffic").json()
+    assert traffic["ok"] is False and traffic["setup"] and "SPT_TOMTOM_API_KEY" in traffic["error"]
+    assert client.get("/companies/AAPL/live/nope").status_code == 404
+
+
+def test_hourly_profile(client):
+    h = client.get("/companies/AMZN/hourly").json()
+    assert h["metric"] == "venue_busyness" and len(h["hours"]) == 24
+    assert any(x["typical"] is not None for x in h["hours"])

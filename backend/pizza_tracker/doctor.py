@@ -118,16 +118,47 @@ def check_vision() -> Check:
     return Check("YOLO vehicle counting", "ok", "model loaded")
 
 
+def check_weather() -> Check:
+    from .live.weather import fetch_weather
+
+    w = fetch_weather(*APPLE_PARK)
+    return Check("Weather + AQI (Open-Meteo)", "ok", f"Cupertino {w['temp_f']}°F {w['summary']}, AQI {w['us_aqi']}")
+
+
+def check_skies() -> Check:
+    from .live.skies import fetch_skies
+
+    sky = fetch_skies(*APPLE_PARK)
+    return Check("Aircraft (ADS-B)", "ok", f"{sky['overhead']} overhead near Apple Park, {sky['bizjets']} business jets ({sky['source']})")
+
+
+def check_traffic() -> Check:
+    if not get_settings().tomtom_api_key:
+        return Check("Traffic flow (TomTom)", "skip", "set SPT_TOMTOM_API_KEY (free tier: https://developer.tomtom.com)")
+    from .live.traffic import fetch_traffic
+
+    t = fetch_traffic(*APPLE_PARK)
+    return Check("Traffic flow (TomTom)", "ok", f"{t['current_speed_mph']} mph vs {t['free_flow_speed_mph']} free-flow")
+
+
 CHECKS: list[Callable[[], Check]] = [
     check_caltrans, check_wsdot, check_511pa, check_edgar, check_yfinance,
-    check_overpass, check_nominatim, check_vision,
+    check_overpass, check_nominatim, check_weather, check_skies, check_traffic, check_vision,
 ]
+
+
+LABELS = {
+    "check_caltrans": "Caltrans cameras", "check_wsdot": "WSDOT cameras", "check_511pa": "511PA cameras",
+    "check_edgar": "SEC EDGAR", "check_yfinance": "Yahoo prices", "check_overpass": "OSM venues (Overpass)",
+    "check_nominatim": "OSM geocoding (Nominatim)", "check_weather": "Weather + AQI (Open-Meteo)",
+    "check_skies": "Aircraft (ADS-B)", "check_traffic": "Traffic flow (TomTom)", "check_vision": "YOLO vehicle counting",
+}
 
 
 def run_checks(checks: list[Callable[[], Check]] | None = None) -> list[Check]:
     results = []
     for fn in checks or CHECKS:
-        name = fn.__name__.removeprefix("check_")
+        name = LABELS.get(fn.__name__, fn.__name__.removeprefix("check_"))
         try:
             results.append(fn())
         except Exception as exc:  # report and keep going

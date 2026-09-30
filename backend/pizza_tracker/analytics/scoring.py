@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 # How much we trust each signal. Delivery vehicles at the gate are the most specific.
 DEFAULT_WEIGHTS = {
+    "short_stops": 1.6,
+    "bizjet_count": 1.3,
     "delivery_vehicle_count": 1.5,
     "venue_busyness": 1.0,
     "vehicle_count": 0.8,
