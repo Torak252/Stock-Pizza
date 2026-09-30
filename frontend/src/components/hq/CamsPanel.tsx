@@ -2,12 +2,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 import RoiEditor from "@/components/RoiEditor";
-import { Source } from "@/services/api";
+import { Source, stillUrl } from "@/services/api";
 import { ago } from "@/services/useLive";
 import LiveVideo from "./LiveVideo";
 import { Panel, Pill } from "./Panel";
 
-const REFRESH_MS = 30_000; // DOT stills refresh every 1-5 min; re-pull often so we show each new frame promptly
+const REFRESH_MS = 30_000;
+const PROVIDER_LABEL: Record<string, string> = {
+  caltrans: "Caltrans", sdot: "City of Seattle", wsdot: "WSDOT", "511mn": "MnDOT", ne511: "Nebraska DOT",
+  "txdot-dal": "TxDOT Dallas", "txdot-hou": "TxDOT Houston", "511pa": "511PA", manual: "public feed",
+}; // DOT stills refresh every 1-5 min; re-pull often so we show each new frame promptly
 
 /** Yoshi's "Traffic cams": tabbed stills that re-pull themselves, with lane editing one click away. */
 export default function CamsPanel({ cameras, onChanged, now }: { cameras: Source[]; onChanged: () => void; now: Date }) {
@@ -24,7 +28,8 @@ export default function CamsPanel({ cameras, onChanged, now }: { cameras: Source
   useEffect(() => { setFailed(false); setLoadedAt(null); setVideoFailed(false); setVideoLive(false); }, [idx]);
 
   const cam = cameras[Math.min(idx, cameras.length - 1)];
-  const src = cam?.url ? `${cam.url}${cam.url.includes("?") ? "&" : "?"}_=${tick}` : null;
+  const base = cam ? stillUrl(cam) : null;
+  const src = base ? `${base}${base.includes("?") ? "&" : "?"}_=${tick}` : null;
 
   return (
     <Panel title="Traffic cams" className="lg:col-span-2">
@@ -58,7 +63,7 @@ export default function CamsPanel({ cameras, onChanged, now }: { cameras: Source
           </div>
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-ink-2">
             <span>
-              {cam.name} · {(cam.distance_m / 1000).toFixed(1)} km from HQ · {cam.video_url && !videoFailed ? "live video" : "still"} courtesy {cam.provider === "caltrans" ? "Caltrans" : cam.provider}
+              {cam.name} · {(cam.distance_m / 1000).toFixed(1)} km from HQ · {cam.video_url && !videoFailed ? "live video" : "still"} courtesy {PROVIDER_LABEL[cam.provider] ?? cam.provider}
               {!cam.enabled && " · counting off"}
             </span>
             <button onClick={() => setEditing(true)} className="rounded border border-line-2 px-2 py-0.5 hover:border-cheese hover:text-ink">

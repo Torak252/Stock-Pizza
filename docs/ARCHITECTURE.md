@@ -72,28 +72,28 @@ Levels are elevated ≥ 2, high ≥ 3, extreme ≥ 4. **Alerts only fire during 
 - *Precedence:* the share of spikes followed by an 8-K/M&A filing within k days, compared with the base rate.
 - Planned for Phase 3: control for the market (SPY-adjusted abnormal returns), apply Benjamini–Hochberg correction across the 10 tickers × horizons, and use walk-forward evaluation only.
 
-## 4. Signal coverage with free data
+## 4. Camera coverage (checked live, 2026-09-30)
 
-Live signals come from **DOT cameras only**, counted with YOLO:
+| HQ | Nearest public cameras | Provider | Quality | Notes |
+|---|---|---|---|---|
+| Amazon (Seattle) | 5 city street cameras, **140–300 m** (incl. Terry Ave N & Mercer) | City of Seattle (SDOT) | **1080p live video** | Best in the set: streets next to the campus |
+| UnitedHealth (Minnetonka) | US-169 @ Bren Rd 570 m, TH-212/62 710 m | MnDOT 511MN | 720x480 live video | Freeway / interchange views |
+| McKesson (Irving) | SH-114 @ SH-161 540 m, @ Longhorn 650 m | TxDOT Dallas | up to 1080p stills | Las Colinas office blocks at frame edges |
+| Cencora (Conshohocken) | PA-23 @ Fayette St 670 m, I-76 840 m | 511PA (map list, no key) | 320x240 stills | Fayette St is a downtown street view |
+| Alphabet (Mountain View) | US-101 @ Rengstorff 750 m (and 3 more) | Caltrans | 320x260 stills | Freeway only; no public city cameras |
+| Berkshire (Omaha) | I-480 @ Dodge St 1.0 km | Nebraska 511 | 1280x720 stills | PTZ: the view moves |
+| Exxon Mobil (Spring) | I-45 @ Hardy Toll Rd 1.2 km | TxDOT Houston | stills | Freeway only |
+| Apple (Cupertino) | I-280 @ Stevens Creek 1.6 km | Caltrans | 1280x720 live video | One I-280 camera is blocked by trees (disabled in seed/cameras.json) |
+| Walmart (Bentonville) | I-49 @ 8th St 1.3 km | IDrive Arkansas | 720p + video | **Not used:** its acceptable-use policy forbids framing its images |
+| CVS (Woonsocket) | Route 146, 3.4 km+ | RIDOT | 704x480 + video | Too far to reflect CVS traffic; not added |
 
-| HQ | Free camera feed | Status |
-|---|---|---|
-| Apple (Cupertino), Alphabet (Mountain View) | Caltrans District 4 | ✅ Implemented |
-| Amazon (Seattle) | WSDOT (free access code) | ✅ Implemented |
-| Cencora (Conshohocken) | 511PA (free developer key) | ✅ Implemented, not yet run live |
-| Exxon Mobil, McKesson (TX) | TxDOT / DriveTexas | ✍️ Manual: `cli add-camera` |
-| UnitedHealth (MN) | MnDOT / 511MN | ✍️ Manual: `cli add-camera` |
-| CVS (RI) | RIDOT | ✍️ Manual: `cli add-camera` |
-| Berkshire (NE), Walmart (AR) | Nebraska 511 / IDriveArkansas | ✍️ Manual; freeway cameras may be too far from the HQ to help |
+Only Amazon has cameras that see streets next to the campus. Elsewhere, cameras measure traffic on the
+roads serving the campus, which is a weaker, regional signal. Hand-picked additions and exclusions live in
+`backend/pizza_tracker/seed/cameras.json`.
 
-"Manual" means: find a public camera still near the campus on the state DOT's traveller map, copy its image URL, and register it:
-
-```bash
-python -m pizza_tracker.cli add-camera --ticker XOM --name "I-45 at Rayford Rd" \
-    --url https://.../camera.jpg --lat 30.09 --lon -95.43
-```
-
-Every camera, found automatically or added by hand, can be turned off on the dashboard if it shows no campus entrance; its past counts are kept.
+Counting: frames come from the live HLS stream when a camera has one (1280x720 to 1920x1080), else the
+still. YOLO11n runs at 1280 px on HD frames and 640 on small stills, conf 0.25; the median over 3 frames per
+cycle is recorded. Placeholder frames ("Temporarily Unavailable") are skipped, never recorded as zero.
 
 ## 5. Phase roadmap
 
@@ -103,6 +103,7 @@ Every camera, found automatically or added by hand, can be turned off on the das
 | **2** | Free-data, local-first mode; daily market + EDGAR ingestion; `cli study` report; demo/real database guards |
 | **3a** | Tooling for the manual checks: `cli verify` (Nominatim geocoding), a gate-lane (ROI) editor with live YOLO preview on the dashboard |
 | **3b** | 511PA provider; `cli add-camera` for any public still; per-camera on/off switch |
-| 3c | Run the manual checks locally, add cameras for the remaining HQs, start collecting 24/7 |
+| **3c** | Live-source fixes; HQ coordinates verified; Seattle, 511MN/Nebraska, TxDOT and keyless 511PA providers; HD stream decoding; 8 of 10 HQs with live counts |
+| 3d | Start collecting 24/7 on a local machine; decide on Walmart (Arkansas terms) and CVS (no nearby camera) |
 | 4 | After ~3 months of data: SPY-adjusted returns, Benjamini–Hochberg correction across tickers, predictive dashboard page |
 | 5 | Scale toward the Fortune 500 (CSV import + geocoding, Postgres, queue-based workers) |

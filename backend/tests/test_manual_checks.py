@@ -35,7 +35,7 @@ def test_verify_dry_run_does_not_write(Session):
         rows = {r["ticker"]: r for r in pipeline.verify_hqs(s, geocoder=fake_geocoder)}
         assert rows["AAPL"]["shift_m"] == pytest.approx(33, abs=2)
         assert rows["BRK-B"]["geocoded"] is None and rows["WMT"]["geocoded"] is None
-        assert not s.query(Company).filter_by(ticker="MCK").one().coords_verified  # dry run leaves it alone
+        assert s.query(Company).filter_by(ticker="AAPL").one().lat == 37.3349  # dry run leaves coordinates alone
 
 
 def test_verify_apply_updates_coords_and_distances(Session):
@@ -50,7 +50,7 @@ def test_verify_apply_updates_coords_and_distances(Session):
         assert apple.coords_verified and apple.lat == 37.3346
         assert s.query(SignalSource).one().distance_m == pytest.approx(885, abs=5)
         mck = s.query(Company).filter_by(ticker="MCK").one()
-        assert mck.coords_verified and mck.lat == 32.9001  # previously unverified, now saved
+        assert mck.coords_verified and mck.lat == 32.9001  # geocoded coordinates saved
 
 
 def test_roi_roundtrip_and_validation(Session):
@@ -150,3 +150,28 @@ def test_enable_toggle_endpoint(Session):
             assert s.get(SignalSource, cam_id).meta == {}
     finally:
         app.dependency_overrides.clear()
+
+
+def test_curated_cameras_add_and_disable(Session, tmp_path, monkeypatch):
+    import json
+
+    curated = tmp_path / "cameras.json"
+    curated.write_text(json.dumps({"cameras": [
+        {"ticker": "AMZN", "provider": "sdot", "external_id": "denny-westlake", "name": "Denny Way & Westlake",
+         "lat": 47.6186, "lon": -122.3386, "image_url": "https://example/sdot.jpg", "roi": [0.1, 0.2, 0.6, 0.9]},
+        {"ticker": "AAPL", "provider": "caltrans", "external_id": "264", "disabled": True, "note": "trees"},
+        {"ticker": "NOPE", "provider": "x", "external_id": "1", "image_url": "https://example/x.jpg", "name": "x", "lat": 0, "lon": 0},
+    ]}))
+    monkeypatch.setattr(pipeline, "CURATED_FILE", curated)
+    with Session() as s:
+        apple = s.query(Company).filter_by(ticker="AAPL").one()
+        s.add(SignalSource(company_id=apple.id, kind="camera", provider="caltrans", external_id="264", name="TVB90",
+                           lat=37.33, lon=-121.98, distance_m=2000, url="https://example/264.jpg", meta={"route": "I-280"}))
+        s.commit()
+        assert pipeline._apply_curated_cameras(s) == 1
+        assert pipeline._apply_curated_cameras(s) == 0  # idempotent
+        s.commit()
+        sdot = s.query(SignalSource).filter_by(provider="sdot").one()
+        assert sdot.meta["roi"] == [0.1, 0.2, 0.6, 0.9] and 300 < sdot.distance_m < 500
+        trees = s.query(SignalSource).filter_by(external_id="264").one()
+        assert trees.meta == {"route": "I-280", "note": "trees", "disabled": True}

@@ -148,6 +148,12 @@ async function get<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** Browser-loadable still: direct when it's a plain URL, else via the API (e.g. TxDOT's base64 snapshots). */
+export function stillUrl(s: Source): string | null {
+  if (!s.url) return null;
+  return /^https?:\/\//.test(s.url) ? s.url : `${BASE}/sources/${s.id}/still`;
+}
+
 export const api = {
   companies: () => get<Company[]>("/companies"),
   status: () => get<Status>("/status"),

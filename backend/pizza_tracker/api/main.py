@@ -226,6 +226,20 @@ def set_enabled(source_id: int, body: Enabled, session: Session = Depends(get_se
     return {"id": src.id, "enabled": body.enabled}
 
 
+@app.get("/sources/{source_id}/still", responses={200: {"content": {"image/jpeg": {}}}})
+def still(source_id: int, session: Session = Depends(get_session)) -> Response:
+    """Latest still for cameras the browser can't load directly (e.g. TxDOT's base64-in-JSON snapshots)."""
+    from ..collectors.cameras import fetch_snapshot
+
+    src = _camera_or_404(session, source_id)
+    try:
+        img = fetch_snapshot(src.url)
+    except Exception as exc:
+        raise HTTPException(502, f"camera fetch failed: {exc}")
+    kind = "image/png" if img[:8] == b"\x89PNG\r\n\x1a\n" else "image/jpeg"
+    return Response(img, media_type=kind, headers={"Cache-Control": "max-age=30"})
+
+
 @app.get("/sources/{source_id}/preview", responses={200: {"content": {"image/jpeg": {}}}})
 def preview(source_id: int, session: Session = Depends(get_session)) -> Response:
     """Live frame with YOLO detections and the ROI drawn, plus counts in X-Counts headers."""

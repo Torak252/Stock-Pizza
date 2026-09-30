@@ -82,7 +82,7 @@ python -m pizza_tracker.cli study --horizon 5 # spike evenings vs |5-day return|
 
 Cameras keep no archive, so the report only becomes meaningful after a few months of collection.
 
-**Coverage.** `cli map` finds cameras automatically for Apple, Alphabet, Amazon and Cencora. For the other HQs, copy a public camera image URL from the state DOT's traveller map and run `cli add-camera --ticker XOM --name "..." --url ...` (details in docs/ARCHITECTURE.md §4). On the dashboard, turn off any camera that doesn't show a campus entrance.
+**Coverage.** `cli map` finds live cameras for 8 of the 10 HQs (Seattle city cameras beside Amazon; state DOT cameras elsewhere). See docs/ARCHITECTURE.md §4 for the per-HQ table, and add or exclude cameras in `backend/pizza_tracker/seed/cameras.json`.
 
 Docker Compose (Postgres + TimescaleDB) is kept as an option: `docker compose up --build`.
 

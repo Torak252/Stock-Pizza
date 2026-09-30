@@ -1,0 +1,7 @@
+{
+  "_comment": "Hand-picked public cameras per HQ, checked by looking at live frames. `cli map` adds these on top of the automatic DOT providers. `disabled: true` registers a camera but keeps it out of the counts (e.g. it points at trees).",
+  "cameras": [
+    {"ticker": "AAPL", "provider": "caltrans", "external_id": "264", "disabled": true,
+     "note": "TVB90 I-280 Lawrence Expwy SB onramp: view is blocked by trees (checked 2026-09-29)"}
+  ]
+}

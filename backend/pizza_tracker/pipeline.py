@@ -64,7 +64,51 @@ def map_cameras(session: Session, radius_m: float = 5000) -> int:
                     company_id=company.id, kind="camera", provider=cam.provider, external_id=cam.external_id, name=cam.name,
                     lat=cam.lat, lon=cam.lon, distance_m=round(dist), url=cam.image_url, meta=cam.meta,
                 ))
+    added += _apply_curated_cameras(session)
     session.commit()
+    return added
+
+
+CURATED_FILE = __import__("pathlib").Path(__file__).with_name("seed") / "cameras.json"
+
+
+def _apply_curated_cameras(session: Session) -> int:
+    """Add hand-picked cameras from seed/cameras.json and switch off ones known to be useless.
+
+    Entries with an image_url are added as sources; entries without one refer to a camera the
+    automatic providers already found (matched by provider + external_id) and only set flags.
+    """
+    import json
+
+    from .geo import haversine_m
+
+    if not CURATED_FILE.exists():
+        return 0
+    added = 0
+    for entry in json.loads(CURATED_FILE.read_text()).get("cameras", []):
+        company = session.scalar(select(Company).where(Company.ticker == entry["ticker"]))
+        if company is None:
+            continue
+        src = session.scalar(select(SignalSource).where(
+            SignalSource.company_id == company.id, SignalSource.kind == "camera",
+            SignalSource.provider == entry["provider"], SignalSource.external_id == str(entry["external_id"])))
+        if src is None and entry.get("image_url"):
+            src = SignalSource(
+                company_id=company.id, kind="camera", provider=entry["provider"], external_id=str(entry["external_id"]),
+                name=entry["name"], lat=entry["lat"], lon=entry["lon"], url=entry["image_url"],
+                distance_m=round(haversine_m(company.lat, company.lon, entry["lat"], entry["lon"])), meta={},
+            )
+            session.add(src)
+            added += 1
+        if src is None:
+            continue
+        meta = dict(src.meta or {})
+        for key in ("video_url", "roi", "note"):
+            if entry.get(key) and key not in meta:
+                meta[key] = entry[key]
+        if entry.get("disabled"):
+            meta["disabled"] = True
+        src.meta = meta
     return added
 
 
