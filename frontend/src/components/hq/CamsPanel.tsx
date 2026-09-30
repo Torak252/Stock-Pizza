@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import RoiEditor from "@/components/RoiEditor";
 import { Source } from "@/services/api";
 import { ago } from "@/services/useLive";
+import LiveVideo from "./LiveVideo";
 import { Panel, Pill } from "./Panel";
 
 const REFRESH_MS = 30_000; // DOT stills refresh every 1-5 min; re-pull often so we show each new frame promptly
@@ -15,8 +16,12 @@ export default function CamsPanel({ cameras, onChanged, now }: { cameras: Source
   const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [failed, setFailed] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [videoFailed, setVideoFailed] = useState(false);
+  const [videoLive, setVideoLive] = useState(false);
+  const onVideoFail = useCallback(() => setVideoFailed(true), []);
+  const onVideoPlaying = useCallback(() => setVideoLive(true), []);
   useEffect(() => { const id = setInterval(() => setTick(Date.now()), REFRESH_MS); return () => clearInterval(id); }, []);
-  useEffect(() => { setFailed(false); setLoadedAt(null); }, [idx]);
+  useEffect(() => { setFailed(false); setLoadedAt(null); setVideoFailed(false); setVideoLive(false); }, [idx]);
 
   const cam = cameras[Math.min(idx, cameras.length - 1)];
   const src = cam?.url ? `${cam.url}${cam.url.includes("?") ? "&" : "?"}_=${tick}` : null;
@@ -34,7 +39,9 @@ export default function CamsPanel({ cameras, onChanged, now }: { cameras: Source
             ))}
           </div>
           <div className="relative overflow-hidden rounded-md border border-line bg-black">
-            {src && !failed ? (
+            {cam.video_url && !videoFailed ? (
+              <LiveVideo key={cam.video_url} src={cam.video_url} onFail={onVideoFail} onPlaying={onVideoPlaying} />
+            ) : src && !failed ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={src} alt={cam.name} className="aspect-video w-full object-contain"
                 onLoad={() => setLoadedAt(new Date())} onError={() => setFailed(true)} />
@@ -43,13 +50,15 @@ export default function CamsPanel({ cameras, onChanged, now }: { cameras: Source
                 {failed ? "Camera image unavailable right now (offline or blocked)." : "No image URL."}
               </div>
             )}
-            {!failed && (
-              <div className="absolute left-2 top-2"><Pill tone="live" solid>● LIVE · {loadedAt ? ago(loadedAt, now) : "loading"}</Pill></div>
+            {cam.video_url && !videoFailed ? (
+              <div className="absolute left-2 top-2"><Pill tone="live" solid>● LIVE {videoLive ? "video" : "· connecting"}</Pill></div>
+            ) : !failed && (
+              <div className="absolute left-2 top-2"><Pill tone="live" solid>● LIVE · still {loadedAt ? ago(loadedAt, now) : "loading"}</Pill></div>
             )}
           </div>
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-ink-2">
             <span>
-              {cam.name} · {(cam.distance_m / 1000).toFixed(1)} km from HQ · {cam.provider}
+              {cam.name} · {(cam.distance_m / 1000).toFixed(1)} km from HQ · {cam.video_url && !videoFailed ? "live video" : "still"} courtesy {cam.provider === "caltrans" ? "Caltrans" : cam.provider}
               {!cam.enabled && " · counting off"}
             </span>
             <button onClick={() => setEditing(true)} className="rounded border border-line-2 px-2 py-0.5 hover:border-cheese hover:text-ink">

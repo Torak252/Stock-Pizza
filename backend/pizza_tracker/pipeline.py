@@ -130,8 +130,36 @@ def verify_hqs(session: Session, apply: bool = False, geocoder=None) -> list[dic
 _stop_trackers: dict[int, "StopTracker"] = {}
 
 
+def camera_frames(src: SignalSource) -> list:
+    """HD frames from the camera's live stream when it has one, else its latest still."""
+    from .collectors.cameras import fetch_snapshot, fetch_stream_frames
+
+    video = (src.meta or {}).get("video_url")
+    if video:
+        try:
+            return fetch_stream_frames(video)
+        except Exception as exc:  # streams drop out; the still is always there
+            log.info("stream for %s unavailable (%s); using still", src.external_id, exc)
+    return [fetch_snapshot(src.url)]
+
+
+class CameraUnavailable(Exception):
+    """The camera served a placeholder ("Temporarily Unavailable") instead of a scene."""
+
+
+def _camera_detections(src: SignalSource, detect_boxes) -> list:
+    """Detect on each frame and keep the median-count frame, so one odd frame can't spike the count."""
+    from .vision.detector import is_placeholder
+
+    roi = (src.meta or {}).get("roi")
+    frames = [f for f in camera_frames(src) if not is_placeholder(f)]
+    if not frames:
+        raise CameraUnavailable("placeholder image")
+    per_frame = sorted((detect_boxes(f, roi=roi) for f in frames), key=len)
+    return per_frame[len(per_frame) // 2]
+
+
 def collect_camera_counts(session: Session, now: datetime | None = None) -> int:
-    from .collectors.cameras import fetch_snapshot
     from .vision.detector import counts_from, detect_boxes
     from .vision.stops import StopTracker
 
@@ -141,7 +169,7 @@ def collect_camera_counts(session: Session, now: datetime | None = None) -> int:
         if (src.meta or {}).get("disabled"):
             continue
         try:
-            detections = detect_boxes(fetch_snapshot(src.url), roi=(src.meta or {}).get("roi"))
+            detections = _camera_detections(src, detect_boxes)
         except Exception as exc:
             log.warning("camera %s failed: %s", src.external_id, exc)
             continue

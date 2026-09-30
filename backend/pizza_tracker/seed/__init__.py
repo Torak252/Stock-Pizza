@@ -1,7 +1,7 @@
 """Load the Fortune 10 starter set.
 
-Ranks follow the 2025 Fortune 500 list; coordinates are approximate campus centroids and
-are stored with coords_verified=False until someone checks them against the real entrances.
+Ranks follow the 2025 Fortune 500 list. Coordinates were checked against OpenStreetMap on
+2026-09-30; each row records its source, and anything unconfirmed ships with coords_verified=false.
 """
 import json
 from pathlib import Path
@@ -29,6 +29,7 @@ def seed_companies(session: Session) -> int:
                 lat=row["lat"],
                 lon=row["lon"],
                 timezone=row["timezone"],
+                coords_verified=row.get("coords_verified", False),
             )
         )
         added += 1

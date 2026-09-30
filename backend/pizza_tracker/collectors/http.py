@@ -21,12 +21,13 @@ from ..config import get_settings
 
 
 class PoliteClient:
-    def __init__(self, min_interval_s: float | None = None, cache_ttl_s: float = 30.0):
+    def __init__(self, min_interval_s: float | None = None, cache_ttl_s: float = 30.0, max_retries: int | None = None,
+                 timeout_s: float | None = None):
         s = get_settings()
         ua = s.user_agent if not s.contact_email else f"{s.user_agent} <{s.contact_email}>"
-        self._client = httpx.Client(timeout=s.http_timeout_s, headers={"User-Agent": ua}, follow_redirects=True)
+        self._client = httpx.Client(timeout=timeout_s or s.http_timeout_s, headers={"User-Agent": ua}, follow_redirects=True)
         self._min_interval = min_interval_s if min_interval_s is not None else s.default_min_interval_s
-        self._max_retries = s.http_max_retries
+        self._max_retries = s.http_max_retries if max_retries is None else max_retries
         self._last_hit: dict[str, float] = {}
         self._cache: dict[str, tuple[float, httpx.Response]] = {}
         self._cache_ttl = cache_ttl_s
@@ -50,7 +51,14 @@ class PoliteClient:
         backoff = 2.0
         for attempt in range(self._max_retries + 1):
             self._wait_for_host(host)
-            resp = self._client.get(url, **kwargs)
+            try:
+                resp = self._client.get(url, **kwargs)
+            except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError, httpx.TimeoutException):
+                if attempt >= self._max_retries:
+                    raise
+                time.sleep(backoff)  # transient resets are common on busy public APIs
+                backoff *= 2
+                continue
             if resp.status_code in (429, 503) and attempt < self._max_retries:
                 retry_after = resp.headers.get("Retry-After", "")
                 time.sleep(float(retry_after) if retry_after.isdigit() else backoff)

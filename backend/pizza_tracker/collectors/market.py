@@ -22,7 +22,8 @@ def fetch_daily_bars(ticker: str, period: str = "2y") -> pd.DataFrame:
     import yfinance as yf  # imported lazily: heavy, and only the worker needs it
 
     df = yf.Ticker(ticker).history(period=period, interval="1d", auto_adjust=True)
-    df = df.rename(columns=str.lower)[["open", "high", "low", "close", "volume"]]
+    # The current session's bar can be all-NaN until Yahoo fills it in.
+    df = df.rename(columns=str.lower)[["open", "high", "low", "close", "volume"]].dropna(subset=["close"])
     df.index = df.index.tz_convert("UTC")
     return df
 
@@ -48,7 +49,11 @@ class EdgarClient:
         if self._cik_map is None:
             data = self.client.get(EDGAR_TICKERS).json()
             self._cik_map = {row["ticker"].upper(): int(row["cik_str"]) for row in data.values()}
-        return self._cik_map[ticker.upper().replace("-", ".")]
+        t = ticker.upper()
+        for candidate in (t, t.replace("-", "."), t.replace(".", "-")):  # Yahoo "BRK-B" vs SEC spellings
+            if candidate in self._cik_map:
+                return self._cik_map[candidate]
+        raise KeyError(f"{ticker} not in SEC ticker list")
 
     def recent_filings(self, ticker: str) -> list[dict]:
         return parse_submissions(self.client.get(EDGAR_SUBMISSIONS.format(cik=self.cik_for(ticker))).json())

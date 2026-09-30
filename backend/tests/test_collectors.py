@@ -22,12 +22,17 @@ def test_caltrans_inventory_skips_out_of_service():
         {"cctv": {"index": "1", "inService": "true",
                   "location": {"latitude": "37.33", "longitude": "-122.01", "locationName": "I-280 at De Anza", "route": "I-280"},
                   "imageData": {"static": {"currentImageURL": "https://example/1.jpg", "currentImageUpdateFrequency": "2"}}}},
+        {"cctv": {"index": "3", "inService": "true",
+                  "location": {"latitude": "37.35", "longitude": "-122.03", "locationName": "I-280 at Wolfe"},
+                  "imageData": {"streamingVideoURL": "https://wzmedia.dot.ca.gov/D4/x.stream/playlist.m3u8",
+                                "static": {"currentImageURL": "https://example/3.jpg", "currentImageUpdateFrequency": "Not Reported"}}}},
         {"cctv": {"index": "2", "inService": "false",
                   "location": {"latitude": "37.34", "longitude": "-122.02"},
                   "imageData": {"static": {"currentImageURL": "https://example/2.jpg"}}}},
     ]}
     cams = CaltransProvider(client=object()).parse_inventory(payload)
-    assert len(cams) == 1 and cams[0].refresh_s == 120 and cams[0].meta["route"] == "I-280"
+    assert len(cams) == 2 and cams[0].refresh_s == 120 and cams[0].meta["route"] == "I-280"
+    assert cams[1].refresh_s == 300 and cams[1].meta["video_url"].endswith("playlist.m3u8")  # "Not Reported" -> default
 
 
 def test_wsdot_inventory():

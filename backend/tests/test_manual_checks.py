@@ -23,6 +23,8 @@ def Session(tmp_path):
 def fake_geocoder(address):
     if "Cupertino" in address:
         return GeocodeResult(37.3346, -122.0090, "Apple Park", "way")
+    if "Irving" in address:
+        return GeocodeResult(32.9001, -96.9602, "McKesson", "way")
     if "Omaha" in address:
         raise RuntimeError("timeout")
     return None
@@ -33,7 +35,7 @@ def test_verify_dry_run_does_not_write(Session):
         rows = {r["ticker"]: r for r in pipeline.verify_hqs(s, geocoder=fake_geocoder)}
         assert rows["AAPL"]["shift_m"] == pytest.approx(33, abs=2)
         assert rows["BRK-B"]["geocoded"] is None and rows["WMT"]["geocoded"] is None
-        assert not s.query(Company).filter_by(ticker="AAPL").one().coords_verified
+        assert not s.query(Company).filter_by(ticker="MCK").one().coords_verified  # dry run leaves it alone
 
 
 def test_verify_apply_updates_coords_and_distances(Session):
@@ -47,7 +49,8 @@ def test_verify_apply_updates_coords_and_distances(Session):
         apple = s.query(Company).filter_by(ticker="AAPL").one()
         assert apple.coords_verified and apple.lat == 37.3346
         assert s.query(SignalSource).one().distance_m == pytest.approx(885, abs=5)
-        assert not s.query(Company).filter_by(ticker="WMT").one().coords_verified
+        mck = s.query(Company).filter_by(ticker="MCK").one()
+        assert mck.coords_verified and mck.lat == 32.9001  # previously unverified, now saved
 
 
 def test_roi_roundtrip_and_validation(Session):
@@ -75,7 +78,14 @@ def test_roi_roundtrip_and_validation(Session):
         assert c.put(f"/sources/{cam_id}/roi", json={"x1": 0, "y1": 0, "x2": 1.5, "y2": 1}).status_code == 422
         assert c.put(f"/sources/{venue_id}/roi", json={"x1": 0, "y1": 0, "x2": 1, "y2": 1}).status_code == 404
         assert c.put(f"/sources/{cam_id}/roi").json()["roi"] is None  # no body clears it
-        assert c.get(f"/sources/{cam_id}/preview").status_code == 501  # vision extra not installed here
+        import importlib.util
+
+        real_find_spec = importlib.util.find_spec
+        importlib.util.find_spec = lambda name, *a: None if name in ("cv2", "ultralytics") else real_find_spec(name, *a)
+        try:
+            assert c.get(f"/sources/{cam_id}/preview").status_code == 501  # vision extra missing
+        finally:
+            importlib.util.find_spec = real_find_spec
         with Session() as s:
             assert s.get(SignalSource, cam_id).meta == {"route": "I-280"}  # other meta untouched
     finally:
@@ -84,8 +94,9 @@ def test_roi_roundtrip_and_validation(Session):
 
 def test_add_manual_camera(Session):
     with Session() as s:
-        src = pipeline.add_manual_camera(s, "xom", "I-45 at Rayford", "https://example/cam.jpg", 30.09, -95.43)
-        assert src.provider == "manual" and 500 < src.distance_m < 1000
+        xom = s.query(Company).filter_by(ticker="XOM").one()
+        src = pipeline.add_manual_camera(s, "xom", "I-45 at Rayford", "https://example/cam.jpg", xom.lat + 0.006, xom.lon)
+        assert src.provider == "manual" and 600 < src.distance_m < 740  # 0.006 deg latitude ~ 667 m
         same_place = pipeline.add_manual_camera(s, "MCK", "Gate cam", "https://example/gate.jpg")
         assert same_place.distance_m == 0  # defaults to the HQ point
         for args, msg in [
@@ -107,7 +118,8 @@ def test_disabled_cameras_are_skipped(Session, monkeypatch):
     from pizza_tracker.vision.detector import counts_from
 
     boxes = [((0.1, 0.1, 0.2, 0.2), "car"), ((0.5, 0.5, 0.6, 0.6), "truck")]
-    fake_detector = types.SimpleNamespace(detect_boxes=lambda img, roi=None: boxes, counts_from=counts_from)
+    fake_detector = types.SimpleNamespace(detect_boxes=lambda img, roi=None: boxes, counts_from=counts_from,
+                                      is_placeholder=lambda img: False)
     monkeypatch.setitem(sys.modules, "pizza_tracker.vision.detector", fake_detector)
     monkeypatch.setattr(cameras, "fetch_snapshot", lambda url: b"jpeg")
     with Session() as s:

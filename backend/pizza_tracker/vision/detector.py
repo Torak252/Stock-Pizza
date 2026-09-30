@@ -40,14 +40,20 @@ def _in_roi(box: list[float], w: int, h: int, roi: Roi | None) -> bool:
     return roi[0] <= cx <= roi[2] and roi[1] <= cy <= roi[3]
 
 
-def _detect(image_bytes: bytes, conf: float):
+def _detect(image, conf: float):
+    """image: encoded bytes (JPEG/PNG) or a decoded BGR array.
+
+    Input size follows the frame: HD stream frames run at 1280 px so distant cars survive;
+    small stills (e.g. Caltrans 320x260) stay at 640, where upscaling further adds noise.
+    """
     import cv2
     import numpy as np
 
-    frame = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+    frame = image if isinstance(image, np.ndarray) else cv2.imdecode(np.frombuffer(image, np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
         raise ValueError("could not decode camera frame")
-    result = _model()(frame, conf=conf, classes=list(COCO_VEHICLES), verbose=False)[0]
+    imgsz = 1280 if frame.shape[1] >= 960 else 640
+    result = _model()(frame, imgsz=imgsz, conf=conf, classes=list(COCO_VEHICLES), verbose=False)[0]
     boxes = [(box, COCO_VEHICLES[int(cls)]) for box, cls in zip(result.boxes.xyxy.tolist(), result.boxes.cls.tolist())]
     return frame, boxes
 
@@ -60,7 +66,25 @@ def _counts(by_class: dict[str, int]) -> FrameCounts:
     )
 
 
-def detect_boxes(image_bytes: bytes, conf: float = 0.35, roi: Roi | None = None) -> list[tuple[tuple[float, float, float, float], str]]:
+def is_placeholder(image) -> bool:
+    """True for "Temporarily Unavailable" cards and blank frames: mostly one flat colour.
+
+    A real road scene has texture almost everywhere; a placeholder is a flat background with
+    a little text. Recording 0 vehicles for those would drag the baseline down.
+    """
+    import cv2
+    import numpy as np
+
+    frame = image if isinstance(image, np.ndarray) else cv2.imdecode(np.frombuffer(image, np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        return True
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)[: int(frame.shape[0] * 0.85)]  # skip the timestamp bar
+    edges = cv2.Laplacian(gray, cv2.CV_64F)
+    flat_share = float((np.abs(edges) < 2).mean())
+    return flat_share > 0.8 or float(gray.std()) < 8
+
+
+def detect_boxes(image_bytes, conf: float = 0.25, roi: Roi | None = None) -> list[tuple[tuple[float, float, float, float], str]]:
     """Vehicles inside the ROI as (normalized box, class name)."""
     frame, boxes = _detect(image_bytes, conf)
     h, w = frame.shape[:2]
@@ -74,12 +98,12 @@ def counts_from(detections: list[tuple[tuple[float, float, float, float], str]])
     return _counts(by_class)
 
 
-def count_vehicles(image_bytes: bytes, conf: float = 0.35, roi: Roi | None = None) -> FrameCounts:
+def count_vehicles(image_bytes, conf: float = 0.25, roi: Roi | None = None) -> FrameCounts:
     """roi = (x1, y1, x2, y2) as fractions of the frame, e.g. just the lanes into the campus gate."""
     return counts_from(detect_boxes(image_bytes, conf, roi))
 
 
-def annotate(image_bytes: bytes, conf: float = 0.35, roi: Roi | None = None) -> tuple[bytes, FrameCounts]:
+def annotate(image_bytes, conf: float = 0.25, roi: Roi | None = None) -> tuple[bytes, FrameCounts]:
     """Draw the ROI and every detection (green = counted, grey = outside ROI) for manual review."""
     import cv2
 

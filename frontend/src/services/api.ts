@@ -131,6 +131,7 @@ export interface Source {
   url: string | null;
   roi: Roi | null;
   enabled: boolean;
+  video_url: string | null; // live HLS stream when the camera has one
 }
 
 export interface Preview {

@@ -135,7 +135,7 @@ def sources(ticker: str, session: Session = Depends(get_session)) -> list[dict]:
     c = _company_or_404(session, ticker)
     return [
         {"id": s.id, "kind": s.kind, "provider": s.provider, "name": s.name, "lat": s.lat, "lon": s.lon,
-         "distance_m": s.distance_m, "url": s.url, "roi": (s.meta or {}).get("roi"),
+         "distance_m": s.distance_m, "url": s.url, "roi": (s.meta or {}).get("roi"), "video_url": (s.meta or {}).get("video_url"),
          "enabled": not (s.meta or {}).get("disabled", False)}
         for s in session.scalars(select(SignalSource).where(SignalSource.company_id == c.id).order_by(SignalSource.distance_m))
     ]
@@ -231,14 +231,14 @@ def preview(source_id: int, session: Session = Depends(get_session)) -> Response
     """Live frame with YOLO detections and the ROI drawn, plus counts in X-Counts headers."""
     import importlib.util
 
-    from ..collectors.cameras import fetch_snapshot
+    from ..pipeline import camera_frames
     from ..vision.detector import annotate
 
     src = _camera_or_404(session, source_id)
     if not all(importlib.util.find_spec(m) for m in ("cv2", "ultralytics")):
         raise HTTPException(501, 'preview needs the vision extra: pip install -e ".[vision]"')
     try:
-        jpg, counts = annotate(fetch_snapshot(src.url), roi=(src.meta or {}).get("roi"))
+        jpg, counts = annotate(camera_frames(src)[-1], roi=(src.meta or {}).get("roi"))
     except Exception as exc:
         raise HTTPException(502, f"camera fetch or detection failed: {exc}")
     return Response(jpg, media_type="image/jpeg", headers={
@@ -302,8 +302,9 @@ def hourly(ticker: str, metric: str | None = None, session: Session = Depends(ge
 
     c = _company_or_404(session, ticker)
     since = datetime.now(timezone.utc) - timedelta(weeks=8)
+    # Only metrics that have ever been non-zero: a brand-new short_stops series of zeros says nothing yet.
     have = set(session.scalars(select(ActivitySample.metric).where(
-        ActivitySample.company_id == c.id, ActivitySample.ts >= since).distinct()))
+        ActivitySample.company_id == c.id, ActivitySample.ts >= since, ActivitySample.value > 0).distinct()))
     metric = metric or next((m for m in HOURLY_METRICS if m in have), None)
     if metric is None:
         return {"metric": None, "hours": []}

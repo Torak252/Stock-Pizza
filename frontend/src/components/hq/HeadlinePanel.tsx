@@ -35,7 +35,7 @@ export default function HeadlinePanel({ c, wire, quote, now }: { c: Company; wir
           )}
           {last8k && (
             <p className="mt-1 text-xs text-ink-2">
-              Last 8-K filed {hqTime(last8k, c.timezone, true)} · {wire?.data?.eightk_sample} on record
+              Last 8-K filed {new Date(last8k).toLocaleDateString("en-US", { timeZone: c.timezone, weekday: "short", month: "short", day: "numeric" })}, {hqTime(last8k, c.timezone)} · {wire?.data?.eightk_sample} on record
             </p>
           )}
           {quote?.data?.last != null && (

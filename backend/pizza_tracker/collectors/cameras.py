@@ -50,6 +50,14 @@ class CameraProvider(ABC):
         return sorted([s for s in scored if s[1] <= radius_m], key=lambda s: s[1])[:limit]
 
 
+def _minutes(value, default: int = 5) -> int:
+    """Caltrans reports refresh minutes as a string, occasionally "Not Reported"."""
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
 class CaltransProvider(CameraProvider):
     """Caltrans CWWP2 CCTV feed. District 4 = SF Bay Area (Apple, Alphabet)."""
 
@@ -83,8 +91,9 @@ class CaltransProvider(CameraProvider):
                     lat=lat,
                     lon=lon,
                     image_url=img,
-                    refresh_s=int(c.get("imageData", {}).get("static", {}).get("currentImageUpdateFrequency", 5) or 5) * 60,
-                    meta={"route": loc.get("route"), "district": self.district},
+                    refresh_s=_minutes(c.get("imageData", {}).get("static", {}).get("currentImageUpdateFrequency")) * 60,
+                    meta={"route": loc.get("route"), "district": self.district, "direction": loc.get("direction"),
+                          "video_url": c.get("imageData", {}).get("streamingVideoURL") or None},
                 )
             )
         return cams
@@ -177,3 +186,38 @@ def fetch_snapshot(image_url: str, client: PoliteClient | None = None) -> bytes:
     """Fetch one still frame. Callers must not persist it unless store_camera_frames is on."""
     client = client or PoliteClient(min_interval_s=1.0, cache_ttl_s=55)
     return client.get(image_url).content
+
+
+def fetch_stream_frames(playlist_url: str, count: int = 3, client: PoliteClient | None = None) -> list:
+    """Decode `count` evenly spaced frames from the newest complete segment of an HLS stream.
+
+    Caltrans streams are 1280x720 (4x the stills), which is what lets YOLO see distant cars.
+    The newest segment can still be empty while it's being written, so we take the newest
+    one that has bytes. Requires PyAV (`pip install av`, part of the vision extra).
+    """
+    import io
+    from urllib.parse import urljoin
+
+    import av
+
+    client = client or PoliteClient(min_interval_s=0.2, cache_ttl_s=5)
+
+    def media_lines(text: str) -> list[str]:
+        return [ln for ln in text.splitlines() if ln and not ln.startswith("#")]
+
+    master = client.get(playlist_url)
+    lines = media_lines(master.text)
+    if not lines:
+        raise ValueError("empty HLS playlist")
+    chunklist = master
+    if lines[-1].endswith(".m3u8"):  # master playlist -> variant chunklist
+        chunklist = client.get(urljoin(str(master.url), lines[-1]))
+    for seg in reversed(media_lines(chunklist.text)):
+        data = client.get(urljoin(str(chunklist.url), seg)).content
+        if not data:
+            continue
+        frames = [f.to_ndarray(format="bgr24") for f in av.open(io.BytesIO(data)).decode(video=0)]
+        if frames:
+            step = max(1, len(frames) // count)
+            return frames[::step][:count]
+    raise ValueError("no decodable segment in HLS stream")

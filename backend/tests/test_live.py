@@ -93,3 +93,16 @@ def test_short_stops():
         t.update([parked], 1000 + ts)
     assert t.update([], 3000) == 0             # stayed 28 min: parked, not a drop-off
     assert iou(car[0], car[0]) == 1 and iou(car[0], passing[0]) == 0
+
+
+def test_placeholder_frames_are_rejected():
+    cv2 = pytest.importorskip("cv2")
+    np = pytest.importorskip("numpy")
+    from pizza_tracker.vision.detector import is_placeholder
+
+    card = np.full((260, 320, 3), 255, np.uint8)  # "Temporarily Unavailable" style: white card, a line of text
+    cv2.putText(card, "Temporarily", (40, 110), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (80, 20, 20), 3)
+    scene = np.random.default_rng(0).integers(0, 255, (260, 320, 3), dtype=np.uint8)  # textured everywhere
+    assert is_placeholder(card) and is_placeholder(np.zeros((260, 320, 3), np.uint8))
+    assert not is_placeholder(scene)
+    assert is_placeholder(b"not an image")
